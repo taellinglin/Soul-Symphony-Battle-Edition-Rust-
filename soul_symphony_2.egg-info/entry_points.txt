@@ -1,2 +1,0 @@
-[console_scripts]
-ss-battle = main:run

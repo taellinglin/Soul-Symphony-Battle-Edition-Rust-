@@ -1,29 +1,15 @@
 use macroquad::prelude::*;
 
-mod game;
 mod world;
+mod game;
+mod entities;
 
-fn window_conf() -> Conf {
-    Conf {
-        window_title: "Soul Symphony Battle Edition".to_string(),
-        fullscreen: true,
-        ..Default::default()
-    }
-}
-
-#[macroquad::main(window_conf)]
+#[macroquad::main("Soul Symphony")]
 async fn main() {
-    let mut game = game::Game::new().await;
-
     loop {
-        let dt = get_frame_time();
-        game.update(dt);
-        if game.should_quit() {
-            break;
-        }
-
         clear_background(BLACK);
-        game.draw();
+
+        draw_text("Soul Symphony: Fresh Start", 20.0, 20.0, 30.0, DARKGRAY);
 
         next_frame().await
     }

@@ -1,17 +1,21 @@
 {
-  "player_level": 15,
-  "player_xp": 237.27630096644316,
-  "player_xp_next": 380.295180068469,
-  "player_level_cycle_idx": 14,
-  "player_attack_stat": 8,
-  "player_defense_stat": 11,
-  "player_dex_stat": 13,
-  "player_sta_stat": 8,
-  "player_int_stat": 5,
-  "player_hp_max": 148.0,
-  "player_hp": 148.0,
-  "sword_damage_multiplier": 1.839,
-  "monster_wave_index": 4,
-  "boss_active": false,
-  "boss_return_pos": null
+    "player_level": 9,
+    "player_xp": 52.509994173748936,
+    "player_xp_next": 86.46911284551354,
+    "player_level_cycle_idx": 8,
+    "player_attack_stat": 2,
+    "player_defense_stat": 5,
+    "player_dex_stat": 6,
+    "player_sta_stat": 2,
+    "player_int_stat": 3,
+    "player_hp_max": 112.0,
+    "player_hp": 75.14154485083543,
+    "sword_damage_multiplier": 1.135,
+    "monster_wave_index": 3,
+    "boss_active": false,
+    "boss_return_pos": [
+        133.5058135986328,
+        299.8226623535156,
+        0.6381937265396118
+    ]
 }
