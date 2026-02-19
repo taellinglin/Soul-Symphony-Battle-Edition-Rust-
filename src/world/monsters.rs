@@ -62,6 +62,7 @@ struct EnemyProjectile {
 pub struct MonsterEvents {
     pub damage_to_player: f32,
     pub monsters_slain: i32,
+    pub slain_positions: Vec<Vec3>,
 }
 
 pub struct MonsterSystem {
@@ -206,6 +207,7 @@ impl MonsterSystem {
                 alive.push(monster);
             } else {
                 events.monsters_slain += 1;
+                events.slain_positions.push(monster.position);
             }
         }
         self.monsters = alive;
@@ -257,6 +259,18 @@ impl MonsterSystem {
 
     pub fn stats(&self) -> (i32, i32) {
         (self.monsters_total, self.monsters_slain)
+    }
+
+    pub fn apply_player_attack(&mut self, center: Vec3, radius: f32, damage: f32) -> i32 {
+        let mut hits = 0;
+        let r2 = radius * radius;
+        for monster in &mut self.monsters {
+            if (monster.position - center).length_squared() <= r2 {
+                monster.hp -= damage;
+                hits += 1;
+            }
+        }
+        hits
     }
 
     fn spawn_wave(&mut self, bounds: (f32, f32, f32, f32), floor_z: f32, player_pos: Vec3) {

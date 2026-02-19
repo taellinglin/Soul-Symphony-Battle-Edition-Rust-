@@ -28,6 +28,8 @@ pub struct ArenaFx {
     fog_start: f32,
     fog_end: f32,
     reflection_strength: f32,
+    world_min: Vec3,
+    world_max: Vec3,
 }
 
 impl ArenaFx {
@@ -53,6 +55,12 @@ impl ArenaFx {
                 uniforms: vec![
                     UniformDesc::new("u_time", UniformType::Float1),
                     UniformDesc::new("u_uv_scale", UniformType::Float1),
+                    UniformDesc::new("u_uv_offset", UniformType::Float2),
+                    UniformDesc::new("u_uv_axis_mode", UniformType::Float1),
+                    UniformDesc::new("u_cube_uv", UniformType::Float1),
+                    UniformDesc::new("u_surface_normal", UniformType::Float3),
+                    UniformDesc::new("u_world_min", UniformType::Float3),
+                    UniformDesc::new("u_world_max", UniformType::Float3),
                     UniformDesc::new("u_alpha", UniformType::Float1),
                     UniformDesc::new("u_rainbow_strength", UniformType::Float1),
                     UniformDesc::new("u_diffusion_strength", UniformType::Float1),
@@ -107,9 +115,11 @@ impl ArenaFx {
             level_z_step: 6.0,
             static_uv: false,
             fog_color: vec3(0.0, 0.0, 0.0),
-            fog_start: 2.0,
-            fog_end: 140.0,
+            fog_start: 0.8,
+            fog_end: 18.0,
             reflection_strength: 0.0,
+            world_min: vec3(0.0, 0.0, 0.0),
+            world_max: vec3(1.0, 1.0, 1.0),
         }
     }
 
@@ -118,7 +128,7 @@ impl ArenaFx {
     }
 
     pub fn set_compression_factor(&mut self, value: f32) {
-        self.compression_factor = value.clamp(0.0, 1.0);
+        self.compression_factor = value.clamp(0.42, 1.9);
     }
 
     pub fn set_thermal_strength(&mut self, value: f32) {
@@ -137,6 +147,15 @@ impl ArenaFx {
         self.level_z_step = value.max(0.1);
     }
 
+    pub fn set_world_bounds(&mut self, min: Vec3, max: Vec3) {
+        self.world_min = min;
+        self.world_max = vec3(
+            (max.x - min.x).max(0.001) + min.x,
+            (max.y - min.y).max(0.001) + min.y,
+            (max.z - min.z).max(0.001) + min.z,
+        );
+    }
+
     #[allow(dead_code)]
     pub fn set_fog(&mut self, color: Vec3, start: f32, end: f32) {
         self.fog_color = color;
@@ -146,9 +165,23 @@ impl ArenaFx {
 
     pub fn draw_water(&self, center: Vec3, size: Vec2, uv_scale: f32) {
         let mesh = build_xy_plane(center, size, Color::from_rgba(255, 255, 255, 200));
+        let span = self.world_max - self.world_min;
+        let uv_offset = vec2(
+            (center.x - self.world_min.x) / span.x.max(0.001),
+            (center.y - self.world_min.y) / span.y.max(0.001),
+        );
 
         self.water_material.set_uniform("u_time", self.time);
         self.water_material.set_uniform("u_uv_scale", uv_scale);
+        self.water_material
+            .set_uniform("u_uv_offset", uv_offset);
+        self.water_material.set_uniform("u_cube_uv", 0.0);
+        self.water_material
+            .set_uniform("u_surface_normal", vec3(0.0, 0.0, 1.0));
+        self.water_material
+            .set_uniform("u_world_min", self.world_min);
+        self.water_material
+            .set_uniform("u_world_max", self.world_max);
         self.water_material.set_uniform("u_alpha", self.alpha);
         self.water_material
             .set_uniform("u_rainbow_strength", self.rainbow_strength);
@@ -188,6 +221,76 @@ impl ArenaFx {
             .set_uniform("u_fog_end", self.fog_end);
         self.water_material
             .set_uniform("u_reflection_strength", self.reflection_strength);
+        self.water_material
+            .set_texture("u_water_tex", self.water_tex.clone());
+        self.water_material
+            .set_texture("u_room_tex", self.room_tex.clone());
+        self.water_material
+            .set_texture("u_reflection_tex", self.reflection_tex.clone());
+
+        gl_use_material(&self.water_material);
+        draw_mesh(&mesh);
+        gl_use_default_material();
+    }
+
+    pub fn draw_room_thermal(&self, center: Vec3, size: Vec2, uv_scale: f32) {
+        let mesh = build_xy_plane(center, size, Color::from_rgba(255, 255, 255, 200));
+        let span = self.world_max - self.world_min;
+        let uv_offset = vec2(
+            (center.x - self.world_min.x) / span.x.max(0.001),
+            (center.y - self.world_min.y) / span.y.max(0.001),
+        );
+
+        self.water_material.set_uniform("u_time", self.time);
+        self.water_material.set_uniform("u_uv_scale", uv_scale);
+        self.water_material
+            .set_uniform("u_uv_offset", uv_offset);
+        self.water_material.set_uniform("u_cube_uv", 1.0);
+        self.water_material
+            .set_uniform("u_surface_normal", vec3(0.0, 0.0, 1.0));
+        self.water_material
+            .set_uniform("u_world_min", self.world_min);
+        self.water_material
+            .set_uniform("u_world_max", self.world_max);
+        self.water_material.set_uniform("u_alpha", 0.7);
+        self.water_material
+            .set_uniform("u_rainbow_strength", 0.0);
+        self.water_material
+            .set_uniform("u_diffusion_strength", 0.2);
+        self.water_material
+            .set_uniform("u_spec_strength", 0.0);
+        self.water_material
+            .set_uniform("u_room_tex_strength", 0.0);
+        self.water_material
+            .set_uniform("u_room_tex_desat", 1.0);
+        self.water_material
+            .set_uniform("u_thermal_mode", 1.0);
+        self.water_material
+            .set_uniform("u_thermal_strength", 1.0);
+        self.water_material
+            .set_uniform("u_compression_factor", self.compression_factor);
+        self.water_material
+            .set_uniform("u_compression_thermal_strength", 1.0);
+        self.water_material
+            .set_uniform("u_density_contrast", 1.35);
+        self.water_material
+            .set_uniform("u_density_gamma", 0.85);
+        self.water_material
+            .set_uniform("u_player_w", self.player_w);
+        self.water_material
+            .set_uniform("u_corridor_w", self.corridor_w);
+        self.water_material
+            .set_uniform("u_level_z_step", self.level_z_step);
+        self.water_material
+            .set_uniform("u_static_uv", 1.0);
+        self.water_material
+            .set_uniform("u_fog_color", self.fog_color);
+        self.water_material
+            .set_uniform("u_fog_start", self.fog_start);
+        self.water_material
+            .set_uniform("u_fog_end", self.fog_end);
+        self.water_material
+            .set_uniform("u_reflection_strength", 0.0);
         self.water_material
             .set_texture("u_water_tex", self.water_tex.clone());
         self.water_material
@@ -254,6 +357,11 @@ uniform sampler2D u_room_tex;
 uniform sampler2D u_reflection_tex;
 uniform float u_time;
 uniform float u_uv_scale;
+uniform vec2 u_uv_offset;
+uniform float u_cube_uv;
+uniform vec3 u_surface_normal;
+uniform vec3 u_world_min;
+uniform vec3 u_world_max;
 uniform float u_alpha;
 uniform float u_rainbow_strength;
 uniform float u_diffusion_strength;
@@ -321,6 +429,8 @@ float compute_level_w_like(vec3 p) {
     float f1 = fbm(n1);
     float n = (f0 * 0.68 + f1 * 0.32);
     float w = (n * 2.0 - 1.0) * 2.25;
+    float w_shift = clamp(u_player_w / max(1.0, u_corridor_w), -1.0, 1.0);
+    w += w_shift * 1.1;
     return clamp(w, -2.25, 2.25);
 }
 
@@ -332,31 +442,31 @@ vec3 roygbiv_thermal(float t) {
     float band = 1.0 / 7.0;
     if (x < band) {
         c0 = vec3(1.0, 0.0, 0.0);
-        c1 = vec3(1.0, 0.5, 0.0);
+        c1 = vec3(1.0, 0.35, 0.0);
         local = x / band;
     } else if (x < band * 2.0) {
-        c0 = vec3(1.0, 0.5, 0.0);
-        c1 = vec3(1.0, 1.0, 0.0);
+        c0 = vec3(1.0, 0.45, 0.0);
+        c1 = vec3(1.0, 0.9, 0.0);
         local = (x - band) / band;
     } else if (x < band * 3.0) {
         c0 = vec3(1.0, 1.0, 0.0);
-        c1 = vec3(0.0, 1.0, 0.0);
+        c1 = vec3(0.15, 1.0, 0.0);
         local = (x - band * 2.0) / band;
     } else if (x < band * 4.0) {
         c0 = vec3(0.0, 1.0, 0.0);
-        c1 = vec3(0.0, 0.0, 1.0);
+        c1 = vec3(0.0, 0.9, 1.0);
         local = (x - band * 3.0) / band;
     } else if (x < band * 5.0) {
-        c0 = vec3(0.0, 0.0, 1.0);
-        c1 = vec3(0.29, 0.0, 0.51);
+        c0 = vec3(0.0, 0.2, 1.0);
+        c1 = vec3(0.55, 0.0, 1.0);
         local = (x - band * 4.0) / band;
     } else if (x < band * 6.0) {
-        c0 = vec3(0.29, 0.0, 0.51);
-        c1 = vec3(0.56, 0.0, 1.0);
+        c0 = vec3(0.55, 0.0, 1.0);
+        c1 = vec3(0.85, 0.0, 1.0);
         local = (x - band * 5.0) / band;
     } else {
-        c0 = vec3(0.56, 0.0, 1.0);
-        c1 = vec3(0.85, 0.45, 1.0);
+        c0 = vec3(0.85, 0.0, 1.0);
+        c1 = vec3(1.0, 0.35, 1.0);
         local = (x - band * 6.0) / band;
     }
     local = smoothstep(0.0, 1.0, local);
@@ -401,11 +511,23 @@ vec3 hue_shift(vec3 c, float a) {
 }
 
 void main() {
+    vec3 world_span = max(u_world_max - u_world_min, vec3(0.001));
+    vec3 world_norm = (v_world_pos - u_world_min) / world_span;
+    world_norm.y = 1.0 - world_norm.y;
+    float uv_scale = max(0.02, u_uv_scale);
+    vec2 uv_xy = (world_norm.xy - u_uv_offset) * uv_scale;
+    vec2 uv_xz = vec2(world_norm.x - u_uv_offset.x, world_norm.z) * uv_scale;
+    vec2 uv_yz = vec2(world_norm.y - u_uv_offset.y, world_norm.z) * uv_scale;
+    vec3 abs_n = abs(u_surface_normal);
+    float w_sum = max(0.0001, abs_n.x + abs_n.y + abs_n.z);
+    vec3 weights = abs_n / w_sum;
+    vec2 uv_cube = uv_xy * weights.z + uv_xz * weights.y + uv_yz * weights.x;
+
     float local_w = compute_level_w_like(v_world_pos);
     float density = (local_w + 2.25) / 4.5;
     if (u_static_uv > 0.5) {
         vec3 static_pos = v_world_pos;
-        static_pos.xy *= 6.0;
+        static_pos.xy = (u_cube_uv > 0.5) ? uv_cube : uv_xy;
         local_w = compute_level_w_like(static_pos);
         density = (local_w + 2.25) / 4.5;
         float micro = fbm(static_pos.xy * 0.35 + vec2(9.1, -4.3));
@@ -417,14 +539,23 @@ void main() {
     density = clamp(density * u_density_contrast, 0.0, 1.0);
     density = pow(density, u_density_gamma);
     density = smoothstep(0.0, 1.0, density);
-    vec3 thermal_col = roygbiv_thermal(density);
+    float log_k = 6.0;
+    density = log(1.0 + density * log_k) / log(1.0 + log_k);
+    float band_steps = 9.0;
+    float band_pos = density * band_steps;
+    float band_idx = floor(clamp(band_pos, 0.0, band_steps - 1.0));
+    float band_center = (band_idx + 0.5) / band_steps;
+    float band_edge = smoothstep(0.15, 0.85, fract(band_pos));
+    vec3 thermal_col = roygbiv_thermal(band_center);
+    thermal_col = mix(thermal_col, roygbiv_thermal(clamp(band_center + 1.0 / band_steps, 0.0, 1.0)), band_edge * 0.12);
+    thermal_col = clamp(thermal_col * 1.12 + vec3(0.06, 0.02, 0.08), 0.0, 1.0);
     float cycle_mix = clamp(u_rainbow_strength, 0.0, 1.0);
     if (cycle_mix > 0.001) {
         vec3 cycle_col = roygbiv_thermal(density);
         thermal_col = mix(thermal_col, cycle_col, cycle_mix);
     }
 
-    vec2 uv = v_world_xy * max(0.02, u_uv_scale * 0.08);
+    vec2 uv = (u_cube_uv > 0.5) ? uv_cube : uv_xy;
     vec2 flow_a = vec2(u_time * 0.09, -u_time * 0.05);
     vec2 flow_b = vec2(-u_time * 0.06, u_time * 0.07);
 
@@ -465,8 +596,8 @@ void main() {
     bool thermal_only = (u_thermal_mode > 0.5 && u_thermal_strength > 0.01 && u_room_tex_strength <= 0.01
         && u_spec_strength <= 0.01 && u_diffusion_strength <= 0.01 && u_rainbow_strength <= 0.01);
     vec3 final_col = thermal_only ? thermal_col : mix(water_col, thermal_col, thermal_mix);
-    float compression_intensity = clamp((1.0 - u_compression_factor) / 0.65, 0.0, 1.0);
-    vec3 compression_col = roygbiv_thermal(compression_intensity);
+    float compression_t = clamp((u_compression_factor - 0.42) / (1.9 - 0.42), 0.0, 1.0);
+    vec3 compression_col = mix(vec3(0.12, 0.38, 0.95), vec3(0.95, 0.2, 0.1), compression_t);
     float compression_mix = clamp(u_compression_thermal_strength, 0.0, 1.0);
     final_col = mix(final_col, compression_col, compression_mix);
     if (!thermal_only) {

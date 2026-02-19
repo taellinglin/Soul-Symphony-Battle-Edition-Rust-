@@ -14,6 +14,7 @@ pub struct FollowCamera {
     max_distance: f32,
     collision_radius: f32,
     min_world_height: f32,
+    ground_height_offset: f32,
     fov_y: f32,
     mouse_look_enabled: bool,
     mouse_look_sensitivity_x: f32,
@@ -29,23 +30,24 @@ pub struct FollowCamera {
 impl FollowCamera {
     pub fn new() -> Self {
         Self {
-            position: vec3(0.0, 0.0, 18.0),
+            position: vec3(0.0, 0.0, 6.8),
             target: Vec3::ZERO,
             smoothing: 12.0,
-            distance: 34.0,
+            distance: 6.8,
             heading_deg: 0.0,
-            pitch_deg: 14.0,
+            pitch_deg: 28.0,
             target_height: 0.32,
-            min_pitch: 6.0,
-            max_pitch: 80.0,
-            min_distance: 34.0,
-            max_distance: 34.0,
+            min_pitch: 12.0,
+            max_pitch: 70.0,
+            min_distance: 2.2,
+            max_distance: 12.0,
             collision_radius: 0.18,
             min_world_height: 0.4,
-            fov_y: 120.0,
+            ground_height_offset: 2.35,
+            fov_y: 108.0,
             mouse_look_enabled: true,
-            mouse_look_sensitivity_x: 0.16,
-            mouse_look_sensitivity_y: 0.13,
+            mouse_look_sensitivity_x: 0.24,
+            mouse_look_sensitivity_y: 0.2,
             mouse_look_smooth: 0.62,
             mouse_look_invert_y: false,
             mouse_turn_input: 0.0,
@@ -56,6 +58,10 @@ impl FollowCamera {
     }
 
     pub fn update_input(&mut self, dt: f32) {
+        if self.mouse_look_enabled {
+            set_cursor_grab(true);
+            show_mouse(false);
+        }
         self.apply_mouse_look();
         self.handle_input(dt);
     }
@@ -69,32 +75,14 @@ impl FollowCamera {
         water_height: f32,
     ) {
         self.target = target + vec3(0.0, 0.0, self.target_height);
-        let orbit = orbit_position(self.target, self.heading_deg, self.pitch_deg, self.distance);
-        let mut to_cam = orbit - self.target;
-        let dist = to_cam.length();
-        if dist < 1.0e-4 {
-            to_cam = vec3(0.0, -1.0, 0.0);
-        } else {
-            to_cam /= dist;
-        }
-        if to_cam.z < 0.0 {
-            to_cam.z = -to_cam.z;
-            let len = to_cam.length().max(1.0e-4);
-            to_cam /= len;
-        }
-        let mut desired = self.target + to_cam * self.distance.max(self.min_distance);
-
-        let min_above = self.target.z + (self.distance * 0.35).max(0.2);
+        let heading_rad = self.heading_deg.to_radians();
+        let back_dir = vec3(heading_rad.sin(), -heading_rad.cos(), 0.0).normalize();
+        let mut desired = self.target + back_dir * self.distance.max(self.min_distance);
         let min_floor = floor_z + self.min_world_height;
         let min_water = water_height + 0.35;
-        let min_height = min_above.max(min_floor).max(min_water);
-        if desired.z < min_height {
-            let mut to_cam = desired - self.target;
-            to_cam.z = min_height - self.target.z;
-            let len = to_cam.length().max(1.0e-4);
-            to_cam /= len;
-            desired = self.target + to_cam * self.distance.max(self.min_distance);
-        }
+        let ground_height = floor_z + self.ground_height_offset + self.target_height;
+        let min_height = ground_height.max(min_floor).max(min_water);
+        desired.z = min_height;
 
         let (min_x, max_x, min_y, max_y) = bounds;
         let margin = self.collision_radius.max(0.0);
@@ -119,10 +107,10 @@ impl FollowCamera {
         set_camera(&Camera3D {
             position: self.position,
             target: self.target,
-            up: vec3(0.0, 0.0, 1.0),
+            up: vec3(0.0, 0.0, -1.0),
             fovy: self.fov_y,
-            z_near: 0.012,
-            z_far: 1500.0,
+            z_near: 0.0,
+            z_far: 10.0,
             render_target,
             ..Default::default()
         });
@@ -135,6 +123,11 @@ impl FollowCamera {
         } else {
             dir.normalize()
         }
+    }
+
+    pub fn nudge(&mut self, delta: Vec3) {
+        self.position += delta;
+        self.target += delta;
     }
 
     pub fn forward_for_target(&self, target: Vec3) -> Vec3 {

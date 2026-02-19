@@ -6,6 +6,7 @@ pub struct Player {
     angular_velocity: Vec3,
     mass: f32,
     max_speed: f32,
+    base_max_speed: f32,
     radius: f32,
     gravity: f32,
     linear_damping: f32,
@@ -31,18 +32,21 @@ pub struct Player {
     max_jumps: i32,
     jumps_used: i32,
     last_move_dir: Vec3,
+    last_move_active: bool,
     roll_phase: f32,
     ball_texture: Option<Texture2D>,
 }
 
 impl Player {
     pub fn new(spawn: Vec3) -> Self {
+        let base_max_speed = 15.25;
         Self {
             position: spawn,
             velocity: Vec3::ZERO,
             angular_velocity: Vec3::ZERO,
             mass: 1.25,
-            max_speed: 15.25,
+            max_speed: base_max_speed,
+            base_max_speed,
             radius: 0.68,
             gravity: -9.81,
             linear_damping: 0.28,
@@ -68,6 +72,7 @@ impl Player {
             max_jumps: 2,
             jumps_used: 0,
             last_move_dir: vec3(0.0, 1.0, 0.0),
+            last_move_active: false,
             roll_phase: 0.0,
             ball_texture: None,
         }
@@ -87,6 +92,15 @@ impl Player {
         self.velocity = Vec3::ZERO;
     }
 
+    pub fn set_position_and_velocity(&mut self, position: Vec3, velocity: Vec3) {
+        self.position = position;
+        self.velocity = velocity;
+    }
+
+    pub fn velocity(&self) -> Vec3 {
+        self.velocity
+    }
+
     pub fn speed_ratio(&self) -> f32 {
         let planar = vec2(self.velocity.x, self.velocity.y);
         let speed = planar.length();
@@ -97,8 +111,21 @@ impl Player {
         }
     }
 
+    pub fn speed_norm(&self) -> f32 {
+        if self.max_speed <= 0.0 {
+            0.0
+        } else {
+            (self.velocity.length() / self.max_speed).clamp(0.0, 1.0)
+        }
+    }
+
     pub fn set_ball_texture(&mut self, texture: Option<Texture2D>) {
         self.ball_texture = texture;
+    }
+
+    pub fn set_speed_multiplier(&mut self, mult: f32) {
+        let mult = mult.clamp(0.35, 3.5);
+        self.max_speed = self.base_max_speed * mult;
     }
 
     pub fn update(
@@ -108,6 +135,7 @@ impl Player {
         bounds: (f32, f32, f32, f32),
         camera_forward: Vec3,
         water_height: Option<f32>,
+        wrap_enabled: bool,
     ) -> bool {
         let mut jumped = false;
         let up = vec3(0.0, 0.0, 1.0);
@@ -152,6 +180,7 @@ impl Player {
                 self.last_move_dir = move_dir;
             }
         }
+        self.last_move_active = desired_move_dir.is_some();
 
         if let Some(move_dir) = desired_move_dir {
             let desired_velocity = move_dir * self.max_speed;
@@ -247,28 +276,30 @@ impl Player {
             }
         }
 
-        let (min_x, max_x, min_y, max_y) = bounds;
-        if self.position.x < min_x + self.radius {
-            self.position.x = min_x + self.radius;
-            if self.velocity.x < 0.0 {
-                self.velocity.x = 0.0;
+        if !wrap_enabled {
+            let (min_x, max_x, min_y, max_y) = bounds;
+            if self.position.x < min_x + self.radius {
+                self.position.x = min_x + self.radius;
+                if self.velocity.x < 0.0 {
+                    self.velocity.x = 0.0;
+                }
+            } else if self.position.x > max_x - self.radius {
+                self.position.x = max_x - self.radius;
+                if self.velocity.x > 0.0 {
+                    self.velocity.x = 0.0;
+                }
             }
-        } else if self.position.x > max_x - self.radius {
-            self.position.x = max_x - self.radius;
-            if self.velocity.x > 0.0 {
-                self.velocity.x = 0.0;
-            }
-        }
 
-        if self.position.y < min_y + self.radius {
-            self.position.y = min_y + self.radius;
-            if self.velocity.y < 0.0 {
-                self.velocity.y = 0.0;
-            }
-        } else if self.position.y > max_y - self.radius {
-            self.position.y = max_y - self.radius;
-            if self.velocity.y > 0.0 {
-                self.velocity.y = 0.0;
+            if self.position.y < min_y + self.radius {
+                self.position.y = min_y + self.radius;
+                if self.velocity.y < 0.0 {
+                    self.velocity.y = 0.0;
+                }
+            } else if self.position.y > max_y - self.radius {
+                self.position.y = max_y - self.radius;
+                if self.velocity.y > 0.0 {
+                    self.velocity.y = 0.0;
+                }
             }
         }
 
@@ -325,5 +356,30 @@ impl Player {
         v_planar *= planar_drag;
         let v_up = v_up * vertical_drag;
         self.velocity = v_planar + up * v_up;
+    }
+
+    pub fn apply_compression_response(&mut self, compression_factor: f32, dt: f32) {
+        if compression_factor < 0.999 {
+            let mut vertical_speed = self.velocity.z;
+            let mut horizontal = vec3(self.velocity.x, self.velocity.y, 0.0);
+            let mut h_drag = (1.0 - (1.0 - compression_factor) * dt * 1.45).max(0.76);
+            let mut v_drag = (1.0 - (1.0 - compression_factor) * dt * 0.82).max(0.84);
+            if self.last_move_active {
+                h_drag += (1.0 - h_drag) * 0.52;
+                v_drag += (1.0 - v_drag) * 0.36;
+            }
+            horizontal *= h_drag;
+            vertical_speed *= v_drag;
+            self.velocity = vec3(horizontal.x, horizontal.y, vertical_speed);
+        } else if compression_factor > 1.001 {
+            let gain = compression_factor - 1.0;
+            let h_boost = (1.0 + gain * dt * 2.4).min(1.9);
+            let v_boost = (1.0 + gain * dt * 1.4).min(1.6);
+            let mut horizontal = vec3(self.velocity.x, self.velocity.y, 0.0);
+            let vertical_speed = self.velocity.z;
+            horizontal *= h_boost;
+            let vertical_speed = vertical_speed * v_boost;
+            self.velocity = vec3(horizontal.x, horizontal.y, vertical_speed);
+        }
     }
 }

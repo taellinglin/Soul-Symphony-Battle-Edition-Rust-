@@ -54,6 +54,7 @@ impl Game {
         if !self.paused {
             self.world.update(dt);
             self.postfx.update(dt);
+            self.postfx.update_compression(self.world.compression_factor());
             self.audio.update(dt);
             let events = self.world.take_events();
             self.audio.apply_events(events.audio);

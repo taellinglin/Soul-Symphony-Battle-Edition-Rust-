@@ -83,7 +83,7 @@ impl WeaponsSystem {
             attack_cooldown: 0.0,
             sword_reach: 1.8,
             sword_forward_offset: 0.34,
-            sword_side_offset: 0.22,
+            sword_side_offset: -0.22,
             sword_up_offset: 0.84,
             swing_duration: 0.18,
             spin_duration: 0.32,
@@ -234,9 +234,10 @@ impl WeaponsSystem {
         } else {
             right = right.normalize();
         }
+        let side_sign = if self.sword_side_offset >= 0.0 { 1.0 } else { -1.0 };
         let spawn = player_pos
             + dir * self.sword_forward_offset
-            + right * self.sword_side_offset
+            + right * (self.sword_side_offset.abs() * side_sign)
             + up * self.sword_up_offset;
         self.sword_throw = Some(Projectile {
             kind: ProjectileKind::SwordThrow,
@@ -308,13 +309,14 @@ impl WeaponsSystem {
                     } else {
                         right_throw = right_throw.normalize();
                     }
+                    let side_sign = if self.sword_side_offset >= 0.0 { 1.0 } else { -1.0 };
 
                     let arc = (t * std::f32::consts::PI).sin() * distance * 0.16;
                     let hover = 0.08 + 0.12 * (t * std::f32::consts::PI).sin();
                     let origin = self.sword_throw_origin.unwrap_or(player_pos);
                     throw_proj.position = origin
                         + dir * (distance * forward_amount)
-                        + right_throw * arc
+                        + right_throw * (arc * side_sign)
                         + up * hover;
                 }
                 if self.attack_timer >= self.sword_throw_total_time {
@@ -442,9 +444,10 @@ impl WeaponsSystem {
         } else {
             right = right.normalize();
         }
+        let side_sign = if self.sword_side_offset >= 0.0 { 1.0 } else { -1.0 };
         let mut base = player_pos
             + dir * self.sword_forward_offset
-            + right * self.sword_side_offset
+            + right * (self.sword_side_offset.abs() * side_sign)
             + up * self.sword_up_offset;
         let min_sword_z = water_height + 0.06;
         if base.z < min_sword_z {

@@ -7,6 +7,12 @@ pub struct PostFx {
     time: f32,
     strength: f32,
     speed: f32,
+    base_strength: f32,
+    base_speed: f32,
+    compression_response: f32,
+    sine_response: f32,
+    dynamic_min_mul: f32,
+    dynamic_max_mul: f32,
     bloom_strength: f32,
     bloom_radius: f32,
     bloom_threshold: f32,
@@ -44,8 +50,14 @@ impl PostFx {
             material,
             size: (width, height),
             time: 0.0,
-            strength: 0.75,
-            speed: 0.65,
+            strength: 0.24,
+            speed: 0.55,
+            base_strength: 0.24,
+            base_speed: 0.55,
+            compression_response: 1.25,
+            sine_response: 0.52,
+            dynamic_min_mul: 0.62,
+            dynamic_max_mul: 2.75,
             bloom_strength: 0.55,
             bloom_radius: 1.25,
             bloom_threshold: 0.75,
@@ -54,6 +66,25 @@ impl PostFx {
 
     pub fn update(&mut self, dt: f32) {
         self.time += dt;
+    }
+
+    pub fn update_compression(&mut self, compression_factor: f32) {
+        let compression_intensity = ((1.0 - compression_factor) / 0.92).clamp(0.0, 1.0);
+        let dilation_intensity = ((compression_factor - 1.0) / 0.9).clamp(0.0, 1.0);
+        let timespace_intensity = compression_intensity.max(dilation_intensity * 0.42);
+        let sine_cycle = 0.5 + 0.5 * (self.time * 2.2).sin();
+        let sine_signed = sine_cycle * 2.0 - 1.0;
+
+        let base_mul = 1.0 + timespace_intensity * self.compression_response;
+        let sine_mul = 1.0 + sine_signed * timespace_intensity * self.sine_response;
+        let dynamic_mul = (base_mul * sine_mul)
+            .clamp(self.dynamic_min_mul, self.dynamic_max_mul);
+
+        self.strength = self.base_strength
+            * (1.05 + 0.95 * timespace_intensity)
+            * (0.92 + 0.24 * sine_cycle)
+            * dynamic_mul;
+        self.speed = self.base_speed * (0.4 + 0.95 * timespace_intensity) * (0.92 + 0.24 * sine_cycle);
     }
 
     pub fn ensure_size(&mut self) {
