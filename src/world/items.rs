@@ -98,8 +98,13 @@ fn spawn_monsters_items_handler(
     
     // Spawn Health Powerups
     for (i, room) in graph.rooms.iter().enumerate() {
-        // Spawn 1-4 health powerups per room (Python parity)
-        let count = rng.gen_range(1..5);
+        let area = room.w * room.h;
+        let scale_factor = (area / 400.0).max(1.0) as u32; // Assuming 20x20 is a standard room
+
+        // Spawn 1-4 health powerups per standard room area (Python parity)
+        let base_count = rng.gen_range(1..5);
+        let count = (base_count * scale_factor).min(80); // Cap to prevent insane amounts in huge rooms
+
         for _ in 0..count {
             let x = rng.gen_range(room.x + 1.0 .. room.x + room.w - 1.0);
             let z = rng.gen_range(room.y + 1.0 .. room.y + room.h - 1.0);
@@ -113,30 +118,34 @@ fn spawn_monsters_items_handler(
         
         // Spawn Sword Powerup (Rarely - Python 22% parity)
         if rng.gen_bool(0.22) || i == 0 {
-            let x = rng.gen_range(room.x + 1.0 .. room.x + room.w - 1.0);
-            let z = rng.gen_range(room.y + 1.0 .. room.y + room.h - 1.0);
-            let y = 1.25;
+            let sword_count = (1 * scale_factor).max(1).min(10); // Multiple swords for huge rooms
             
-            let pickup_catalog = [
-                ("attack", 100), ("defense", 95), ("dex", 90), ("sta", 95), 
-                ("int", 88), ("haste", 56), ("longblade", 52), ("fury", 48), 
-                ("crit_core", 45), ("critical", 42),
-            ];
-            let total_weight: i32 = pickup_catalog.iter().map(|e| e.1).sum();
-            let mut roll = rng.gen_range(0..total_weight);
-            let mut p_type = "attack".to_string();
-            for (name, weight) in pickup_catalog {
-                if roll < weight {
-                    p_type = name.to_string();
-                    break;
+            for _ in 0..sword_count {
+                let x = rng.gen_range(room.x + 1.0 .. room.x + room.w - 1.0);
+                let z = rng.gen_range(room.y + 1.0 .. room.y + room.h - 1.0);
+                let y = 1.25;
+                
+                let pickup_catalog = [
+                    ("attack", 100), ("defense", 95), ("dex", 90), ("sta", 95), 
+                    ("int", 88), ("haste", 56), ("longblade", 52), ("fury", 48), 
+                    ("crit_core", 45), ("critical", 42),
+                ];
+                let total_weight: i32 = pickup_catalog.iter().map(|e| e.1).sum();
+                let mut roll = rng.gen_range(0..total_weight);
+                let mut p_type = "attack".to_string();
+                for (name, weight) in pickup_catalog {
+                    if roll < weight {
+                        p_type = name.to_string();
+                        break;
+                    }
+                    roll -= weight;
                 }
-                roll -= weight;
+                
+                item_events.send(SpawnItemEvent::Sword {
+                    pos: Vec3::new(x, y, z),
+                    powerup_type: p_type,
+                });
             }
-            
-            item_events.send(SpawnItemEvent::Sword {
-                pos: Vec3::new(x, y, z),
-                powerup_type: p_type,
-            });
         }
     }
 
@@ -380,20 +389,25 @@ fn update_water_crystals(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     rapier_context: Res<bevy_rapier3d::prelude::RapierContext>,
+    mut spawn_timer: Local<f32>,
 ) {
     let dt = time.delta_seconds();
     let roll_time = time.elapsed_seconds() as f32;
     
     // 1. Spawning
+    *spawn_timer -= dt;
     if let Ok(player_tf) = player_query.get_single() {
         let mut rng = rand::thread_rng();
-        // Simple spawn logic: maintain ~72 crystals around player (Python parity 48-84)
-        let count = crystal_query.iter().count();
-        if count < 72 && rng.gen_bool(0.1) {
-            let local_spread = 15.0;
-            let x = player_tf.translation.x + rng.gen_range(-local_spread..local_spread);
-            let z = player_tf.translation.z + rng.gen_range(-local_spread..local_spread);
-            let start_y = player_tf.translation.y + rng.gen_range(8.0..20.0);
+        // Python parity: interval = 0.3s
+        if *spawn_timer <= 0.0 {
+            let count = crystal_query.iter().count();
+            if count < 180 {
+                *spawn_timer += 0.3; // Reset timer
+
+                let local_spread = 60.0;
+                let x = player_tf.translation.x + rng.gen_range(-local_spread..local_spread);
+                let z = player_tf.translation.z + rng.gen_range(-local_spread..local_spread);
+                let start_y = player_tf.translation.y + rng.gen_range(16.0..32.0);
             
             let color = Color::hsv(rng.gen_range(0.0..360.0), rng.gen_range(0.7..1.0), 1.0);
             
@@ -413,12 +427,16 @@ fn update_water_crystals(
                 WaterCrystal {
                     state: CrystalState::Falling,
                     state_age: 0.0,
-                    fall_speed: rng.gen_range(5.0..10.0),
+                    fall_speed: rng.gen_range(0.0..1.0), // Python parity: initially 0.0 to 1.0
                     base_y: 0.0, // Set when landing
                 },
                 Spatial4D { w: 0.0, target_w: 0.0, layer: 0, is_folded: false },
             ));
+        } else {
+            // Cap reached, just reset timer so we attempt again later
+            *spawn_timer += 0.3;
         }
+    }
     }
 
     // 2. State Machine Update
