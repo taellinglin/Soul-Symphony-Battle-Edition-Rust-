@@ -67,6 +67,8 @@ pub struct GravityDirection(pub Vec3);
 
 impl Default for GravityDirection {
     fn default() -> Self {
+        // Original Python parity: zone gravity magnitude 19.62 mapped to Y-down
+        // (PARITY_AUDIT §3.1 notes this matches `gravity_magnitude` rather than Bullet's -9.62 world gravity)
         Self(Vec3::new(0.0, -19.62, 0.0))
     }
 }

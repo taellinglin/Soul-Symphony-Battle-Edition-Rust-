@@ -28,13 +28,14 @@ impl Default for ThermalSettings {
         Self {
             time: 0.0,
             uv_scale: 1.0,
-            density_contrast: 1.0,
-            density_gamma: 1.0,
+            density_contrast: 1.35,
+            density_gamma: 0.85,
             thermal_strength: 1.0,
             compression_factor: 1.0,
             fog_start: 0.0,
-            fog_end: 150.0,
-            fog_color: LinearRgba::new(0.1, 0.12, 0.17, 1.0),
+            // Original arena parity: black fog, 0..35 range
+            fog_end: 35.0,
+            fog_color: LinearRgba::BLACK,
         }
     }
 }

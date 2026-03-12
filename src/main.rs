@@ -230,7 +230,8 @@ fn setup_camera_light(
                 ..default()
             },
             projection: Projection::Perspective(PerspectiveProjection {
-                fov: 75.0_f32.to_radians(),
+                // Match main camera base FOV (camera_fov_base = 108° in original)
+                fov: 108.0_f32.to_radians(),
                 near: 0.012,
                 far: 1500.0,
                 ..default()

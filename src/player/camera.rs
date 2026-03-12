@@ -9,9 +9,6 @@ use super::physics::rotate_around_axis;
 pub(crate) fn sync_camera(
     player_query: Query<(Entity, &Transform, &Spatial4D, &Velocity, &CompressionState), (With<Player>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>, Without<ForegroundCamera>)>,
     mut camera_query: Query<(&mut Transform, &mut Projection), (With<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>, Without<ForegroundCamera>)>,
-    mut floating_text_cam_query: Query<(&mut Transform, &mut Projection), (With<FloatingTextCamera>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<ForegroundCamera>)>,
-    mut foreground_cam_query: Query<(&mut Transform, &mut Projection), (With<ForegroundCamera>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>)>,
-    mut inverted_query: Query<&mut Transform, (With<InvertedEchoCamera>, Without<PlayerCamera>, Without<FloatingTextCamera>, Without<ForegroundCamera>)>,
     mut materials: ResMut<Assets<crate::rendering::HyperSliceMaterial>>,
     mut ball_materials: ResMut<Assets<crate::rendering::BallMaterial>>,
     mut water_materials: ResMut<Assets<crate::rendering::WaterSurfaceMaterial>>,
@@ -29,7 +26,8 @@ pub(crate) fn sync_camera(
     let compression = comp_state.factor_smoothed;
     let ball_pos = player_tf.translation;
 
-    let gravity_up = Vec3::Y; // Standard gravity-up in Bevy
+    // Standard gravity-up in arena mode (Python: base Z-up -> Bevy Y-up)
+    let gravity_up = Vec3::Y;
 
     // ── ref_forward: Panda3D forward (0,1,0) maps to Bevy -Z ──
     // Python: ref_forward = Vec3(0, 1, 0), then projects out gravity component
@@ -45,12 +43,12 @@ pub(crate) fn sync_camera(
     ref_forward = ref_forward.normalize();
 
     let mut raw_h = 0.0_f32;
-    let mut raw_p = 0.0_f32;
+    let mut _raw_p = 0.0_f32;
     for ev in mouse_motion.read() {
         // Use mouse X to control heading (horizontal orbit)
         raw_h -= ev.delta.x * 0.16;
         // Ignore mouse Y for normal chase camera (match original main.py orbit_dir usage)
-        raw_p += 0.0 * ev.delta.y;
+        _raw_p += 0.0 * ev.delta.y;
     }
 
     let smooth = 0.62_f32; // original parity: mouse_look_smooth
@@ -223,34 +221,6 @@ pub(crate) fn sync_camera(
         if let Projection::Perspective(ref mut persp) = *projection {
             persp.fov = fov.to_radians();
         }
-
-        // Sync Floating Text Camera
-        if let Ok((mut ft_cam_tf, mut ft_proj)) = floating_text_cam_query.get_single_mut() {
-            ft_cam_tf.translation = resolved_cam;
-            ft_cam_tf.rotation = camera_tf.rotation;
-            if let Projection::Perspective(ref mut ft_persp) = *ft_proj {
-                ft_persp.fov = fov.to_radians();
-            }
-        }
-
-        // Sync Foreground Camera
-        if let Ok((mut fg_cam_tf, mut fg_proj)) = foreground_cam_query.get_single_mut() {
-            fg_cam_tf.translation = resolved_cam;
-            fg_cam_tf.rotation = camera_tf.rotation;
-            if let Projection::Perspective(ref mut fg_persp) = *fg_proj {
-                fg_persp.fov = fov.to_radians();
-            }
-        }
-
-        // ── Inverted echo camera ──
-        if let Ok(mut inv_camera_tf) = inverted_query.get_single_mut() {
-            let reflection_plane_y = 0.28; // Water surface raise parity
-            let mirrored_pos = Vec3::new(resolved_cam.x, 2.0 * reflection_plane_y - resolved_cam.y, resolved_cam.z);
-            let mirrored_target = Vec3::new(target.x, 2.0 * reflection_plane_y - target.y, target.z);
-            
-            inv_camera_tf.translation = mirrored_pos;
-            inv_camera_tf.look_at(mirrored_target, -Vec3::Y);
-        }
     }
 
     // ── Sync HyperSlice material player_w ──
@@ -276,5 +246,60 @@ pub(crate) fn sync_camera(
         material.extension.settings.fog_color = LinearRgba::BLACK;
         material.extension.settings.fog_start = 0.0;
         material.extension.settings.fog_end = 35.0;
+    }
+}
+
+/// Syncs floating text, foreground, and inverted echo cameras to the main player camera.
+pub(crate) fn sync_overlay_cameras(
+    player_cam_query: Query<(&Transform, &Projection), With<PlayerCamera>>,
+    mut floating_text_cam_query: Query<(&mut Transform, &mut Projection), (With<FloatingTextCamera>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<ForegroundCamera>)>,
+    mut foreground_cam_query: Query<(&mut Transform, &mut Projection), (With<ForegroundCamera>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>)>,
+    mut inverted_query: Query<(&mut Transform, &mut Projection), (With<InvertedEchoCamera>, Without<PlayerCamera>, Without<FloatingTextCamera>, Without<ForegroundCamera>)>,
+) {
+    let Ok((cam_tf, cam_proj)) = player_cam_query.get_single() else { return };
+
+    let cam_pos = cam_tf.translation;
+    let cam_rot = cam_tf.rotation;
+
+    // Extract current FOV from the player camera (if perspective).
+    let mut fov_rad = CAMERA_FOV_BASE.to_radians();
+    if let Projection::Perspective(persp) = cam_proj {
+        fov_rad = persp.fov;
+    }
+
+    // Sync Floating Text Camera
+    if let Ok((mut ft_cam_tf, mut ft_proj)) = floating_text_cam_query.get_single_mut() {
+        ft_cam_tf.translation = cam_pos;
+        ft_cam_tf.rotation = cam_rot;
+        if let Projection::Perspective(ref mut ft_persp) = *ft_proj {
+            ft_persp.fov = fov_rad;
+        }
+    }
+
+    // Sync Foreground Camera
+    if let Ok((mut fg_cam_tf, mut fg_proj)) = foreground_cam_query.get_single_mut() {
+        fg_cam_tf.translation = cam_pos;
+        fg_cam_tf.rotation = cam_rot;
+        if let Projection::Perspective(ref mut fg_persp) = *fg_proj {
+            fg_persp.fov = fov_rad;
+        }
+    }
+
+    // Inverted echo camera — mirror main camera across the echo plane.
+    if let Ok((mut inv_camera_tf, mut inv_proj)) = inverted_query.get_single_mut() {
+        let reflection_plane_y = 12.0;
+        // Bevy 0.14 forward() returns a Dir3; convert to Vec3 explicitly.
+        let forward: Vec3 = cam_tf.forward().into();
+        let target = cam_pos + forward;
+
+        let mirrored_pos = Vec3::new(cam_pos.x, 2.0 * reflection_plane_y - cam_pos.y, cam_pos.z);
+        let mirrored_target = Vec3::new(target.x, 2.0 * reflection_plane_y - target.y, target.z);
+
+        inv_camera_tf.translation = mirrored_pos;
+        inv_camera_tf.look_at(mirrored_target, -Vec3::Y);
+
+        if let Projection::Perspective(ref mut inv_persp) = *inv_proj {
+            inv_persp.fov = fov_rad;
+        }
     }
 }

@@ -104,6 +104,14 @@ fn radar_palette(t: f32) -> vec3<f32> {
     return clamp(m * col, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// Approximate view-space depth using distance from the camera in world space.
+// This matches the previous, working behaviour and avoids floor/ceiling disappearing.
+fn view_space_depth(world_pos: vec3<f32>) -> f32 {
+    let cam_pos = view.world_position.xyz;
+    let to_point = world_pos - cam_pos;
+    return length(to_point);
+}
+
 fn compute_level_w_like(p: vec3<f32>) -> f32 {
     let n0 = p.xz * 0.018;
     let n1 = p.xz * 0.043 + vec2<f32>(13.7, -8.9);
@@ -158,13 +166,11 @@ fn fragment(
     
     var final_col = mix(thermal_col, thermal_band, thermal_blend);
     
-    // Linear Black Fog
-    // View Position Z is strictly Negative (since camera looks down -Z). The distance is the magnitude of Z.
-    // However Bevy exposes the world position directly in VertexOutput. We calculate distance to camera.
-    let dist = distance(view.world_position, world_pos);
+    // Linear black fog using true view-space depth, matching original GLSL v_eye_z usage.
+    // This keeps the visible ceiling/floor band visually parallel instead of forming a curved “halo”.
+    let eye_depth = view_space_depth(world_pos);
     let fog_range = max(0.001, settings.fog_end - settings.fog_start);
-    let fog_factor = clamp((settings.fog_end - dist) / fog_range, 0.0, 1.0);
-    // Fix gray line: use settings.fog_color instead of hardcoded black
+    let fog_factor = clamp((settings.fog_end - eye_depth) / fog_range, 0.0, 1.0);
     final_col = mix(settings.fog_color.rgb, final_col, fog_factor);
     
     pbr_input.material.base_color = vec4<f32>(clamp(final_col, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);

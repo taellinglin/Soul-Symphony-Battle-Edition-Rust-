@@ -337,32 +337,33 @@ pub(crate) fn apply_world_wrap(
 ) {
     if graph.rooms.is_empty() { return; }
 
-    let (map_w, map_d) = if let (Some(w), Some(d)) = (
-        graph.rooms.iter().map(|r| r.x + r.w).reduce(f32::max),
-        graph.rooms.iter().map(|r| r.y + r.h).reduce(f32::max),
-    ) { (w.max(500.0), d.max(500.0)) } else { (500.0, 500.0) };
+    // In arena mode we want \"invisible wall\" behavior instead of topology wrap.
+    // World wrap is still used for other layouts (hexmix / maze3d / etc.).
+    if config.layout_mode == "arena" {
+        return;
+    }
+
+    let map_w = 176.0 * config.scale;
+    let map_d = map_w;
 
     let mut delta = Vec3::ZERO;
-    let margin = 0.35; // Python parity: world_wrap_margin
+    let margin = 0.35;
     let span_x = map_w;
     let span_y = map_d;
-    
-    // Dynamic height bounds based on mode (Arena vs BSP)
-    // Arena parity: loop_half = max(14.0, 18.0 * 0.85) = 15.3
-    // BSP parity: high = wall_h + 4.0, low = -1.4
+
     let (high_y_base, low_y_base) = if config.layout_mode == "arena" {
         (15.3, -15.3)
     } else {
         (config.room_height + 4.0, -1.4)
     };
 
-    let span_z = high_y_base - low_y_base;
+    let span_z = (high_y_base - low_y_base).max(0.001);
 
     let low_x = -margin;
-    let high_x = span_x + margin;
-    let low_z = -margin; // Y in python is Z in rust (depth)
-    let high_z = span_y + margin;
-    let low_y = low_y_base - margin; // Z in python is Y in rust (height)
+    let high_x = map_w + margin;
+    let low_z = -margin;
+    let high_z = map_d + margin;
+    let low_y = low_y_base - margin;
     let high_y = high_y_base + margin;
 
     if let Ok(mut player_tf) = query.get_single_mut() {
@@ -395,7 +396,6 @@ pub(crate) fn apply_world_wrap(
         if delta.length_squared() > 1e-12 {
             player_tf.translation = wrapped;
 
-            // Shift camera instantly to prevent visual hitching (Python lines 11894-11906)
             if let Ok(mut cam_tf) = camera_query.get_single_mut() {
                 cam_tf.translation += delta;
             }
@@ -494,6 +494,119 @@ pub(crate) fn apply_speed_clamping(
     }
 }
 
+pub(crate) fn apply_vertical_limits(
+    mut query: Query<(&mut Transform, &mut Velocity), With<Player>>,
+    gravity: Res<GravityDirection>,
+    config: Res<crate::map::GenerationConfig>,
+) {
+    let Ok((mut tf, mut vel)) = query.get_single_mut() else { return };
+
+    let mut pos = tf.translation;
+    let mut corrected = false;
+    let mut hit_top = false;
+    let mut hit_bottom = false;
+    let mut hit_left = false;
+    let mut hit_right = false;
+    let mut hit_front = false;
+    let mut hit_back = false;
+
+    if config.layout_mode == "arena" {
+        // Invisible wall behavior for arena: clamp to the playable band.
+        // Vertical: visual echo band around floor (≈ [-1.4, 12.0]).
+        let min_y = -1.4 + 0.5;
+        let max_y = 12.0 - 0.5;
+
+        // Horizontal: map extents [0, map_w] with a small inset margin.
+        let map_w = 176.0 * config.scale;
+        let margin = 0.35;
+        let min_x = margin;
+        let max_x = map_w - margin;
+        let min_z = margin;
+        let max_z = map_w - margin;
+
+        if pos.y > max_y {
+            pos.y = max_y;
+            corrected = true;
+            hit_top = true;
+        } else if pos.y < min_y {
+            pos.y = min_y;
+            corrected = true;
+            hit_bottom = true;
+        }
+
+        if pos.x < min_x {
+            pos.x = min_x;
+            corrected = true;
+            hit_left = true;
+        } else if pos.x > max_x {
+            pos.x = max_x;
+            corrected = true;
+            hit_right = true;
+        }
+
+        if pos.z < min_z {
+            pos.z = min_z;
+            corrected = true;
+            hit_back = true;
+        } else if pos.z > max_z {
+            pos.z = max_z;
+            corrected = true;
+            hit_front = true;
+        }
+    } else {
+        // Other layouts: only clamp vertical hyper-bounds derived from room_height.
+        let high_y_base = config.room_height + 4.0;
+        let low_y_base = -1.4;
+        let min_y = low_y_base + 0.5;
+        let max_y = high_y_base - 0.5;
+
+        if pos.y > max_y {
+            pos.y = max_y;
+            corrected = true;
+            hit_top = true;
+        } else if pos.y < min_y {
+            pos.y = min_y;
+            corrected = true;
+            hit_bottom = true;
+        }
+    }
+
+    if corrected {
+        let mut v = vel.linvel;
+
+        // Vertical: kill upward/downward component only when pushing against the band.
+        let up = -gravity.0.normalize_or_zero();
+        if up.length_squared() > 1e-8 {
+            let v_up = up * v.dot(up);
+            let v_lat = v - v_up;
+            let pushing_up = hit_top && v_up.dot(up) > 0.0;
+            let pushing_down = hit_bottom && v_up.dot(up) < 0.0;
+            if pushing_up || pushing_down {
+                v = v_lat;
+            }
+        }
+
+        // Horizontal X: stop motion into the wall, allow tangential sliding.
+        if hit_left && v.x < 0.0 {
+            v.x = 0.0;
+        }
+        if hit_right && v.x > 0.0 {
+            v.x = 0.0;
+        }
+
+        // Horizontal Z: same idea for front/back walls.
+        if hit_back && v.z < 0.0 {
+            v.z = 0.0;
+        }
+        if hit_front && v.z > 0.0 {
+            v.z = 0.0;
+        }
+
+        vel.linvel = v;
+        tf.translation = pos;
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Anti-Tunneling (original _prevent_ball_tunneling lines 11634-11675)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -510,20 +623,27 @@ pub(crate) fn anti_tunneling_system(
     let travel = curr_pos - prev_pos;
     let travel_dist = travel.length();
 
-    // Only check if we moved significantly (original line 11641)
-    if travel_dist > TUNNEL_MIN_TRAVEL {
+    let min_travel = crate::player::TUNNEL_MIN_TRAVEL;
+    if travel_dist > min_travel {
         let ray_dir = travel.normalize();
-        // Cast ray from previous position toward current position
+        let filter = QueryFilter::default()
+            .exclude_collider(player_entity)
+            .groups(CollisionGroups::new(
+                Group::all(),
+                Group::all().difference(Group::GROUP_32),
+            ));
+
         if let Some((_, toi)) = rapier_context.cast_ray(
-            prev_pos, ray_dir, travel_dist, true,
-            QueryFilter::default().exclude_collider(player_entity),
+            prev_pos,
+            ray_dir,
+            travel_dist,
+            true,
+            filter,
         ) {
-            // We tunneled through something — snap back (original lines 11652-16675)
             let hit_pos = prev_pos + ray_dir * toi;
-            let safe_pos = hit_pos - ray_dir * (BALL_RADIUS + 0.06);
+            let safe_pos = hit_pos - ray_dir * (crate::player::BALL_RADIUS + 0.02);
             tf.translation = safe_pos;
 
-            // Kill velocity in travel direction (original lines 11668-11671)
             let v_along = vel.linvel.dot(ray_dir);
             if v_along > 0.0 {
                 vel.linvel -= ray_dir * v_along;

@@ -66,6 +66,16 @@ fn fbm(p_in: vec2<f32>) -> f32 {
     return f;
 }
 
+// Compute view-space depth along the camera forward axis (equivalent to -v_eye_z in the original).
+fn view_space_depth(world_pos: vec3<f32>) -> f32 {
+    // Convert world position into view space using the view_from_world matrix.
+    let world_pos4 = vec4<f32>(world_pos, 1.0);
+    let view_pos4 = view.view_from_world * world_pos4;
+    let view_pos = view_pos4.xyz;
+    // In view space, -Z is forward, so depth in front of the camera is -view_pos.z.
+    return -view_pos.z;
+}
+
 fn compute_level_w_like(p: vec3<f32>) -> f32 {
     let n0 = p.xz * 0.018;
     let n1 = p.xz * 0.043 + vec2(13.7, -8.9);
@@ -273,10 +283,12 @@ fn fragment(
         final_rgb = mix(final_rgb, reflection_sample, settings.reflection_strength * (0.3 + fres * 0.7));
     }
 
-    // Fog with shared 0..35 range and supplied fog color
-    let dist = distance(view.world_position, world_pos);
+    // Fog with shared 0..35 range and supplied fog color.
+    // Match original GLSL, which uses view-space Z (v_eye_z), so the visible floor/ceiling band
+    // stays visually parallel instead of “curving” around the camera.
+    let eye_depth = view_space_depth(world_pos);
     let fog_range = max(0.001, settings.fog_end - settings.fog_start);
-    let fog_factor = clamp((settings.fog_end - dist) / fog_range, 0.0, 1.0);
+    let fog_factor = clamp((settings.fog_end - eye_depth) / fog_range, 0.0, 1.0);
     final_rgb = mix(settings.fog_color.rgb, final_rgb, fog_factor);
 
     var out_alpha = clamp(settings.alpha, 0.0, 1.0);

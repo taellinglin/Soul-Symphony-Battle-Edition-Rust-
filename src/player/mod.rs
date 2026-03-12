@@ -26,25 +26,26 @@ impl Plugin for PlayerPlugin {
                spawn::spawn_player,
                spawn::teleport_to_start.after(crate::map::generate_dungeon),
            ))
-           .add_systems(Update, (
-                physics::player_physics_controller,
-                physics::apply_hyperspace_physics,
-                physics::apply_world_wrap.after(physics::apply_hyperspace_physics),
-                physics::apply_jump_float_drag,
-                physics::apply_compression_physics,
-                physics::apply_water_buoyancy,
-                physics::apply_speed_clamping,
-                physics::anti_tunneling_system,
-                physics::ball_contact_analysis,
-                physics::update_compression_factor,
-                physics::w_dimension_shift,
-                physics::sync_collision_groups,
-                camera::sync_camera,
-                update_billboard_ui,
-                update_local_player_bars,
-                emit_floor_pulses,
-                update_player_visuals,
-           ).chain());
+           // Register all player update systems individually to avoid tuple size/type limits.
+           .add_systems(Update, physics::player_physics_controller)
+           .add_systems(Update, physics::apply_hyperspace_physics)
+           .add_systems(Update, physics::apply_world_wrap.after(physics::apply_hyperspace_physics))
+           .add_systems(Update, physics::apply_jump_float_drag)
+           .add_systems(Update, physics::apply_compression_physics)
+           .add_systems(Update, physics::apply_water_buoyancy)
+           .add_systems(Update, physics::apply_speed_clamping)
+           .add_systems(Update, physics::apply_vertical_limits.after(physics::apply_speed_clamping))
+           .add_systems(Update, physics::anti_tunneling_system.after(physics::apply_vertical_limits))
+           .add_systems(Update, physics::ball_contact_analysis)
+           .add_systems(Update, physics::update_compression_factor)
+           .add_systems(Update, physics::w_dimension_shift)
+           .add_systems(Update, physics::sync_collision_groups)
+           .add_systems(Update, camera::sync_camera)
+           .add_systems(Update, camera::sync_overlay_cameras)
+           .add_systems(Update, update_billboard_ui)
+           .add_systems(Update, update_local_player_bars)
+           .add_systems(Update, emit_floor_pulses)
+           .add_systems(Update, update_player_visuals);
     }
 }
 

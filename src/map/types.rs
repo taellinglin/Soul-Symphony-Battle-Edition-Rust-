@@ -7,6 +7,12 @@ pub struct CeilingEntity;
 pub struct MapGeometry;
 
 #[derive(Component)]
+pub struct EchoSource;
+
+#[derive(Component)]
+pub struct InvertedEchoRoot;
+
+#[derive(Component)]
 pub struct ColorCycleTarget {
     pub base_color: Color,
     pub speed: f32,

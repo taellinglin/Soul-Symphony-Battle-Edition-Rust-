@@ -21,9 +21,9 @@ pub struct DungeonGeneratorPlugin;
 impl Plugin for DungeonGeneratorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DungeonGraph>()
-           .init_resource::<GenerationConfig>()
-           .add_systems(Startup, (generate_dungeon, ceiling::setup_ceiling))
-           .add_systems(Update, (ceiling::update_ceiling, update_color_cycles));
+            .init_resource::<GenerationConfig>()
+            .add_systems(Startup, (generate_dungeon, build_inverted_echo_world, ceiling::setup_ceiling).chain())
+            .add_systems(Update, (ceiling::update_ceiling, update_color_cycles));
     }
 }
 
@@ -39,7 +39,7 @@ pub(crate) fn generate_dungeon(
     mut images: ResMut<Assets<Image>>,
     asset_server: Res<AssetServer>,
     reflection_tex: Res<crate::rendering::ReflectionTexture>,
-){
+) {
     let unit_cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let _unit_plane = meshes.add(Plane3d::default());
     
@@ -223,50 +223,15 @@ pub(crate) fn generate_dungeon(
         }
     });
 
-    // Original parity: inverted level echo uses the water_surface shader with specific settings:
-    // u_alpha=0.5, spec=0, room_tex_strength=0, room_tex_desat=1, rainbow/diffusion=0,
-    // density_contrast=1.35, density_gamma=0.85, compression_thermal_strength=0.
-    let mat_inverted_echo = water_materials.add(crate::rendering::WaterSurfaceMaterial {
-        base: StandardMaterial {
-            alpha_mode: bevy::prelude::AlphaMode::Blend,
-            cull_mode: None,
-            unlit: true,
-            ..default()
-        },
-        extension: crate::rendering::WaterSurfaceExtension {
-            settings: crate::rendering::WaterSurfaceSettings {
-                uv_scale: 1.0,
-                alpha: 0.46, // match inverted_level_echo_opacity (0.46) for the mirrored ceiling
-                // Use the same color/shading parameters as the floor water
-                rainbow_strength: 0.0,
-                diffusion_strength: 0.0,
-                spec_strength: 1.15,
-                room_tex_strength: 0.0,
-                room_tex_desat: 0.15,
-                thermal_mode: 1.0,
-                thermal_strength: 1.0,
-                compression_factor: 1.0,
-                compression_thermal_strength: 0.85,
-                density_contrast: 1.35,
-                density_gamma: 0.85,
-                fog_start: 0.0,
-                fog_end: 35.0,
-                ..default()
-            },
-            room_texture: Some(room_tex.clone()),
-            reflection_texture: Some(reflection_tex.0.clone()),
-        },
-    });
-
     let mat_corridor_floor = floor_materials.add(crate::rendering::thermal::ThermalMaterial {
         base: StandardMaterial::default(),
         extension: crate::rendering::thermal::ThermalExtension {
             settings: crate::rendering::thermal::ThermalSettings {
                 time: 0.0,
-                uv_scale: 15.0,
-                density_contrast: 1.15,
+                uv_scale: 1.0,
+                density_contrast: 1.35,
                 density_gamma: 0.85,
-                thermal_strength: 0.8,
+                thermal_strength: 1.0,
                 compression_factor: 1.0,
                 fog_start: 0.0,
                 fog_end: 35.0,
@@ -280,7 +245,7 @@ pub(crate) fn generate_dungeon(
         extension: crate::rendering::thermal::ThermalExtension {
             settings: crate::rendering::thermal::ThermalSettings {
                 time: 0.0,
-                uv_scale: 30.0,
+                uv_scale: 1.0,
                 density_contrast: 1.35,
                 density_gamma: 0.85,
                 thermal_strength: 1.0,
@@ -300,7 +265,7 @@ pub(crate) fn generate_dungeon(
     // hyper-bounds colliders exist. To match that open startup view, we skip
     // per-room geometry when build_room_geometry is false.
     if build_room_geometry {
-    for r in rooms.iter() {
+        for r in rooms.iter() {
         let _wall_h = config.room_height;
         let _wall_t = config.wall_thickness;
         let cx_w = r.w_layer as f32 * 5.0;
@@ -339,7 +304,7 @@ pub(crate) fn generate_dungeon(
                     extension: crate::rendering::thermal::ThermalExtension {
                         settings: crate::rendering::thermal::ThermalSettings {
                             time: 0.0,
-                            uv_scale: 30.0,
+                            uv_scale: 1.0,
                             density_contrast: 1.35,
                             density_gamma: 0.85,
                             thermal_strength: 1.0,
@@ -358,6 +323,7 @@ pub(crate) fn generate_dungeon(
             collision_groups,
             r.dimension_field.clone(),
             MapGeometry,
+            EchoSource,
         ));
 
         // Python parity: floor_wet shader overlays on floors (ripples/wakes).
@@ -378,6 +344,7 @@ pub(crate) fn generate_dungeon(
                 ..default()
             },
             MapGeometry,
+            EchoSource,
         ));
 
         // Original parity: water surface is map-wide (not per-room). Avoid stacking per-room water meshes to prevent flicker/z-fighting.
@@ -596,7 +563,7 @@ pub(crate) fn generate_dungeon(
                     extension: crate::rendering::thermal::ThermalExtension {
                         settings: crate::rendering::thermal::ThermalSettings {
                             time: 0.0,
-                            uv_scale: 30.0,
+                            uv_scale: 1.0,
                             density_contrast: 1.35,
                             density_gamma: 0.85,
                             thermal_strength: 1.0,
@@ -625,7 +592,7 @@ pub(crate) fn generate_dungeon(
 
 
 
-    }
+        }
     }
 
     // Spawn corridors (Python parity: _build_corridor_segment with walls + decor)
@@ -780,59 +747,38 @@ pub(crate) fn generate_dungeon(
         MaterialMeshBundle {
             mesh: meshes.add(Plane3d::new(Vec3::Y, Vec2::new(boundary_half_x, boundary_half_z))),
             material: mat_water.clone(),
-            transform: Transform::from_xyz(map_half, 0.28, map_half), // floor_y + water_surface_raise
+            transform: Transform::from_xyz(map_half, 0.28, map_half),
             ..default()
         },
         Spatial4D { w: 0.0, target_w: 0.0, layer: 0, is_folded: false },
         MapGeometry,
-    ));
-
-    // Original parity: inverted level echo creates a mirrored "ceiling" above the arena.
-    // The mirror root sits at y = 2 * inverted_plane_y (main.py: inverted_level_echo_plane_z = floor_y + 12).
-    // We approximate the look by placing a second water surface at y=24, flipped to face downward.
-    commands.spawn((
-        MaterialMeshBundle {
-            mesh: meshes.add(Plane3d::new(Vec3::Y, Vec2::new(boundary_half_x, boundary_half_z))),
-            material: mat_inverted_echo.clone(),
-            transform: Transform::from_xyz(map_half, 24.0 + 0.28, map_half)
-                .with_rotation(Quat::from_rotation_x(std::f32::consts::PI)),
-            ..default()
-        },
-        Spatial4D { w: 0.0, target_w: 0.0, layer: 0, is_folded: false },
-        MapGeometry,
+        EchoSource,
     ));
 
     commands.spawn((
         RigidBody::Fixed,
-        Collider::cuboid(boundary_half_x, 10.0, boundary_half_z), // Full map extent, 20 units deep
-        Transform::from_xyz(map_half, 0.28 - 10.0, map_half), // Top surface at y=0.28
+        Collider::cuboid(boundary_half_x, 10.0, boundary_half_z),
+        Transform::from_xyz(map_half, 0.28 - 10.0, map_half),
         GlobalTransform::default(),
-        // Floor hits all layers (bits 0-30) but EXCLUDES Group 32 (bit 31) to ignore camera ray
-        CollisionGroups::new(Group::from_bits_truncate(0x7FFFFFFF), Group::from_bits_truncate(0x7FFFFFFF)), 
+        CollisionGroups::new(Group::from_bits_truncate(0x7FFFFFFF), Group::from_bits_truncate(0x7FFFFFFF)),
         MapGeometry,
     ));
 
-    // ==========================================
-    // PHYSICAL WORLD BOUNDARIES (Height Cap Parity)
-    // ==========================================
     let (high_y, low_y) = if config.layout_mode == "arena" {
         (15.3, -15.3)
     } else {
         (config.room_height + 4.0, -1.4)
     };
 
-    // Top physical ceiling collider
     commands.spawn((
         RigidBody::Fixed,
         Collider::cuboid(boundary_half_x, 0.11, boundary_half_z),
         Transform::from_xyz(map_half, high_y + 0.11, map_half),
         GlobalTransform::default(),
-        // Parity: isolate boundaries to bit 31 (Group 32)
         CollisionGroups::new(Group::GROUP_32, Group::GROUP_32),
         MapGeometry,
     ));
 
-    // Bottom physical floor collider
     commands.spawn((
         RigidBody::Fixed,
         Collider::cuboid(boundary_half_x, 0.11, boundary_half_z),
@@ -841,19 +787,97 @@ pub(crate) fn generate_dungeon(
         CollisionGroups::new(Group::GROUP_32, Group::GROUP_32),
         MapGeometry,
     ));
-
-    // ==========================================
-    // ARENA MODE GENERATION
-    // ==========================================
 }
 
+fn build_inverted_echo_world(
+    mut commands: Commands,
+    water_sources: Query<(&Transform, &Handle<Mesh>, &Handle<crate::rendering::WaterSurfaceMaterial>, Option<&Spatial4D>), With<EchoSource>>,
+    thermal_sources: Query<(&Transform, &Handle<Mesh>, &Handle<crate::rendering::thermal::ThermalMaterial>, Option<&Spatial4D>), With<EchoSource>>,
+    floor_wet_sources: Query<(&Transform, &Handle<Mesh>, &Handle<crate::rendering::FloorWetMaterial>, Option<&Spatial4D>), With<EchoSource>>,
+) {
+    let root_transform = Transform::from_translation(Vec3::new(0.0, 24.0, 0.0))
+        .with_scale(Vec3::new(1.0, -1.0, 1.0));
 
+    let root = commands
+        .spawn((
+            SpatialBundle {
+                transform: root_transform,
+                ..default()
+            },
+            InvertedEchoRoot,
+        ))
+        .id();
 
-// --- Phase 6: Environmental Helpers & Subtractive Maze ---
+    for (transform, mesh, material, spatial) in water_sources.iter() {
+        let spatial4d = spatial.copied().unwrap_or(Spatial4D {
+            w: 0.0,
+            target_w: 0.0,
+            layer: 0,
+            is_folded: false,
+        });
 
+        let echo = commands
+            .spawn((
+                spatial4d,
+                MaterialMeshBundle {
+                    mesh: mesh.clone(),
+                    material: material.clone(),
+                    transform: *transform,
+                    ..default()
+                },
+            ))
+            .id();
 
+        commands.entity(echo).set_parent(root);
+    }
 
-// Python parity: _register_color_cycle — continuous HSV color shifting on surfaces
+    for (transform, mesh, material, spatial) in thermal_sources.iter() {
+        let spatial4d = spatial.copied().unwrap_or(Spatial4D {
+            w: 0.0,
+            target_w: 0.0,
+            layer: 0,
+            is_folded: false,
+        });
+
+        let echo = commands
+            .spawn((
+                spatial4d,
+                MaterialMeshBundle {
+                    mesh: mesh.clone(),
+                    material: material.clone(),
+                    transform: *transform,
+                    ..default()
+                },
+            ))
+            .id();
+
+        commands.entity(echo).set_parent(root);
+    }
+
+    for (transform, mesh, material, spatial) in floor_wet_sources.iter() {
+        let spatial4d = spatial.copied().unwrap_or(Spatial4D {
+            w: 0.0,
+            target_w: 0.0,
+            layer: 0,
+            is_folded: false,
+        });
+
+        let echo = commands
+            .spawn((
+                spatial4d,
+                MaterialMeshBundle {
+                    mesh: mesh.clone(),
+                    material: material.clone(),
+                    transform: *transform,
+                    ..default()
+                },
+            ))
+            .id();
+
+        commands.entity(echo).set_parent(root);
+    }
+}
+
 fn update_color_cycles(
     time: Res<Time>,
     mut query: Query<(&ColorCycleTarget, &Handle<StandardMaterial>)>,
