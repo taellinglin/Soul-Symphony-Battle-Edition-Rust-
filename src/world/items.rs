@@ -96,31 +96,29 @@ fn spawn_monsters_items_handler(
     if graph.rooms.is_empty() { return; }
 
     let mut rng = rand::thread_rng();
-    
-    // Spawn Health Powerups
-    for (i, room) in graph.rooms.iter().enumerate() {
-        let area = room.w * room.h;
-        let scale_factor = (area / 400.0).max(1.0) as u32; // Assuming 20x20 is a standard room
 
-        // Spawn 1-4 health powerups per standard room area (Python parity)
-        let base_count = rng.gen_range(1..5);
-        let count = (base_count * scale_factor).min(80); // Cap to prevent insane amounts in huge rooms
-
-        for _ in 0..count {
+    let health_count = 8;
+    let mut health_spawned = 0usize;
+    for room in graph.rooms.iter() {
+        if health_spawned >= health_count { break; }
+        for _ in 0..(health_count - health_spawned).min(2) {
             let x = rng.gen_range(room.x + 1.0 .. room.x + room.w - 1.0);
             let z = rng.gen_range(room.y + 1.0 .. room.y + room.h - 1.0);
             let y = 1.25;
-            
             item_events.send(SpawnItemEvent::Health {
                 pos: Vec3::new(x, y, z),
                 heal: rng.gen_range(12.0..20.0),
             });
+            health_spawned += 1;
+            if health_spawned >= health_count { break; }
         }
-        
+    }
+
+    for (i, room) in graph.rooms.iter().enumerate() {
         // Spawn Sword Powerup (Rarely - Python 22% parity)
         if rng.gen_bool(0.22) || i == 0 {
-            let sword_count = (1 * scale_factor).max(1).min(10); // Multiple swords for huge rooms
-            
+            let sword_count = 1;
+
             for _ in 0..sword_count {
                 let x = rng.gen_range(room.x + 1.0 .. room.x + room.w - 1.0);
                 let z = rng.gen_range(room.y + 1.0 .. room.y + room.h - 1.0);
@@ -166,7 +164,7 @@ fn spawn_item_handler(
             SpawnItemEvent::Exp { pos, amount } => {
                 let mut remaining = *amount;
                 while remaining > 0.0 {
-                    let val = (remaining * rng.gen_range(0.35..0.7)).max(1.0).min(remaining);
+                    let val = (remaining * rng.gen_range(0.35..0.7)).max(1.0).min(remaining).clamp(1.0, 3.2);
                     remaining -= val;
                     
                     let jitter = Vec3::new(rng.gen_range(-0.4..0.4), rng.gen_range(0.0..0.5), rng.gen_range(-0.4..0.4));

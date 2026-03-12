@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)] // unused_imports: Core3d, Node3d, ViewNodeRunner, RenderGraphApp when CRT node is disabled
 pub mod particles;
 pub mod audio;
 pub mod viscous;
@@ -6,11 +6,11 @@ pub mod trails;
 
 use bevy::{
     prelude::*,
-    core_pipeline::fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+    core_pipeline::{core_3d::graph::{Core3d, Node3d}, fullscreen_vertex_shader::fullscreen_shader_vertex_state},
     ecs::query::QueryItem,
     render::{
         extract_component::{ComponentUniforms, ExtractComponent, ExtractComponentPlugin, UniformComponentPlugin},
-        render_graph::{NodeRunError, RenderGraphContext, ViewNode, RenderLabel},
+        render_graph::{NodeRunError, RenderGraphApp, RenderGraphContext, ViewNode, ViewNodeRunner, RenderLabel},
         render_resource::{binding_types::{sampler, texture_2d, uniform_buffer}, *},
         renderer::{RenderContext, RenderDevice},
         view::{ViewTarget, RenderLayers},
@@ -40,15 +40,10 @@ impl Plugin for FxPlugin {
             spawn_floating_text_handler,
         ));
 
-        let Some(_render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-
-        // NOTE: CRT node is disabled — registering it without connecting it in the
-        // edge chain causes frame smearing because the orphan node's post_process_write()
-        // does a buffer ping-pong swap that corrupts the frame pipeline.
-        // To re-enable: uncomment both the node registration AND add CrtLabel to the edges.
-        //
+        // Parity-original-first: original has no CRT effect (only viscous_distort). CRT disabled.
+        // let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+        //     return;
+        // };
         // render_app
         //     .add_render_graph_node::<ViewNodeRunner<CrtNode>>(Core3d, CrtLabel)
         //     .add_render_graph_edges(

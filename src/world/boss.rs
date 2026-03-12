@@ -4,6 +4,9 @@ use crate::components::Spatial4D;
 use crate::ai::{Monster, Boss};
 use bevy_rapier3d::prelude::*;
 
+pub const BOSS_ARENA_MAJOR_RADIUS: f32 = 18.0;
+pub const BOSS_ARENA_MINOR_RADIUS: f32 = 6.0;
+pub const BOSS_ARENA_WALL_HEIGHT: f32 = 8.0;
 
 pub struct BossPlugin;
 
@@ -107,7 +110,7 @@ fn check_boss_trigger(
             
             // Python parity: _spawn_floating_text(boss_spawn + Vec3(0, 0, 1.8), "BOSS ROOM", (1.0, 0.45, 0.9, 1.0), scale=0.34, life=1.6)
             fx_events.send(crate::effects::FloatingTextEvent {
-                pos: isolated_center + Vec3::new(0.0, 5.0, 0.0),
+                pos: isolated_center + Vec3::new(0.0, BOSS_ARENA_WALL_HEIGHT * 0.625, 0.0),
                 text: "BOSS ROOM".to_string(),
                 color: Color::srgba(1.0, 0.45, 0.9, 1.0),
                 scale: 0.34,
@@ -181,9 +184,9 @@ pub fn build_hex_boss_arena(
             ranged_enabled: true,
             ranged_cooldown: 1.5,
             ai_state_timer: 0.0,
-            hunt_range: 15.0,
+            hunt_range: BOSS_ARENA_MINOR_RADIUS * 2.5, // 15.0
             attack_range: 3.5,
-            guard_range: 22.0,
+            guard_range: BOSS_ARENA_MAJOR_RADIUS + 4.0, // 22.0
             cosmic_warp_cooldown: 0.0,
             last_announced_state: None,
         },
@@ -194,7 +197,7 @@ pub fn build_hex_boss_arena(
         crate::components::Health { current: boss_health, max: boss_health },
         Spatial4D { w: 0.0, target_w: 0.0, layer: 0, is_folded: false },
         crate::components::Velocity4D { lin_v: Vec3::ZERO, w_v: 0.0 },
-        crate::components::Collision4D { radius: 1.5, mask: 2 }, 
+        crate::components::Collision4D { radius: 1.5, mask: 2 },
         BossArenaEntity,
-    ));
+    )).insert(crate::ai::KnockbackVel::default());
 }

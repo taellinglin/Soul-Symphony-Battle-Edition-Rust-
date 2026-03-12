@@ -211,7 +211,7 @@ pub(crate) fn player_physics_controller(
                 if stats.hyperbomb_cooldown <= 0.0 {
                     if let Ok(mut weapon) = weapon_query.get_single_mut() {
                         weapon.state = WeaponState::Hyperbomb;
-                        stats.hyperbomb_cooldown = 1.75; 
+                        stats.hyperbomb_cooldown = 0.65; 
                     }
                 }
             }
@@ -582,7 +582,7 @@ pub(crate) fn w_dimension_shift(
 
     for mut spatial in query.iter_mut() {
         for ev in scroll_evr.read() {
-            spatial.target_w += ev.y * 0.42; // Slower, more precise wheel shift
+            spatial.target_w += ev.y * 0.45;
         }
 
         let shift_speed = 10.0;
@@ -744,11 +744,10 @@ pub fn rotate_around_axis(vec: Vec3, axis: Vec3, angle_rad: f32) -> Vec3 {
 // Water Wave Buoyancy (Python parity: _sample_water_height + _apply_water_buoyancy)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Python parity: water_wave_amplitude=0.2, water_wave_speed=1.4, water_wave_freq_x=0.09, water_wave_freq_y=0.07
-const WATER_WAVE_AMP: f32 = 0.2;
-const WATER_WAVE_SPEED: f32 = 1.4;
-const WATER_WAVE_FX: f32 = 0.09;
-const WATER_WAVE_FY: f32 = 0.07;
+const WATER_WAVE_AMP: f32 = 0.24;
+const WATER_WAVE_SPEED: f32 = 10.4;
+const WATER_WAVE_FX: f32 = 0.9;
+const WATER_WAVE_FY: f32 = 0.7;
 const WATER_BASE_Z: f32 = 0.0; // floor_y
 const WATER_BUOYANCY_BIAS: f32 = 0.62;
 const WATER_BUOYANCY_STRENGTH: f32 = 2.2;

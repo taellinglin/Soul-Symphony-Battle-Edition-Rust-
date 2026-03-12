@@ -59,6 +59,9 @@ pub struct Monster {
     pub last_announced_state: Option<AiState>,
 }
 
+#[derive(Component, Default)]
+pub struct KnockbackVel(pub Vec3);
+
 #[derive(Component)]
 pub struct Mob;
 

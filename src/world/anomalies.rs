@@ -43,12 +43,13 @@ fn spawn_anomalies_deferred(
     let rooms = &graph.rooms;
     if rooms.is_empty() { return; }
 
-    // Exact Python: black_hole_count = 6-12 per session, blower_ratio = 0.46
-    let count = rng.gen_range(6..=12);
+    // Python parity: black_hole_count = 14 (perf) or 28 (default), blower_ratio = 0.46
+    let count = 28;
     let blower_ratio: f32 = 0.46;
     let influence_radius = 15.5; // black_hole_influence_radius
-    let pull_strength = 42.0;    // black_hole_pull_strength
-    let visual_radius = 0.9;     // black_hole_visual_radius
+    let pull_strength = 292.0;   // black_hole_pull_strength
+    let visual_radius = 2.05;    // black_hole_visual_radius
+    let roam_speed = 2.1;        // black_hole_roam_speed
 
     let core_mesh = meshes.add(Sphere::new(visual_radius * 0.52));
     let lens_mesh = meshes.add(Sphere::new(visual_radius * 1.18));
@@ -67,8 +68,8 @@ fn spawn_anomalies_deferred(
         let w = room.w_layer as f32 * 5.0;
 
         // Roaming velocity
-        let vx = rng.gen_range(-0.3..0.3_f32);
-        let vz = rng.gen_range(-0.3..0.3_f32);
+        let dir = Vec3::new(rng.gen_range(-1.0..1.0), 0.0, rng.gen_range(-1.0..1.0)).normalize_or_zero();
+        let vel = if dir.length_squared() < 1e-6 { Vec3::new(1.0, 0.0, 0.0) } else { dir } * roam_speed;
 
         // Core colors from Python
         let (core_color, lens_color, corona_color) = match kind {
@@ -90,7 +91,7 @@ fn spawn_anomalies_deferred(
                 radius: influence_radius,
                 pull_strength,
                 phase,
-                vel: Vec3::new(vx, 0.0, vz),
+                vel,
                 w,
                 room_idx: rng.gen_range(0..rooms.len()),
             },
@@ -177,8 +178,9 @@ fn anomaly_roam(
 fn anomaly_apply_forces(
     anomaly_query: Query<(&Transform, &Anomaly), Without<crate::ai::Monster>>,
     mut player_query: Query<(&Transform, &mut ExternalForce), (With<crate::player::Player>, Without<crate::ai::Monster>, Without<Anomaly>)>,
-    mut monster_query: Query<(Entity, &mut Transform, &mut crate::ai::Monster, &mut Spatial4D), (With<crate::ai::Monster>, Without<crate::player::Player>, Without<Anomaly>)>,
+    mut monster_query: Query<(Entity, &mut Transform, &mut crate::ai::Monster, &mut Spatial4D, Option<&mut crate::ai::KnockbackVel>), (With<crate::ai::Monster>, Without<crate::player::Player>, Without<Anomaly>)>,
     graph: Res<crate::map::DungeonGraph>,
+    hyper: Res<crate::player::HyperspaceState>,
 ) {
     let mut rng = rand::thread_rng();
 
@@ -221,7 +223,7 @@ fn anomaly_apply_forces(
         }
 
         // 2. Force and Warp to Monsters
-        for (_ent, mut m_tf, mut monster, mut m_sp) in monster_query.iter_mut() {
+        for (_ent, mut m_tf, mut monster, mut m_sp, opt_knock) in monster_query.iter_mut() {
             let m_pos = m_tf.translation;
             let to_anomaly_m = pos - m_pos;
             let m_dist = to_anomaly_m.length().max(1e-5);
@@ -237,7 +239,11 @@ fn anomaly_apply_forces(
 
             // Python parity: shove = pull_strength * (0.14 + proximity_m * proximity_m * 1.65) * monster_force_scale
             let shove = anomaly.pull_strength * (0.14 + proximity_m * proximity_m * 1.65) * 0.032;
-            m_tf.translation += move_dir * shove * 0.1; // Direct displacement for now as we don't have knockback_vel yet
+            if let Some(mut knock) = opt_knock {
+                knock.0 += move_dir * shove;
+            } else {
+                m_tf.translation += move_dir * shove * 0.1;
+            }
 
             // Suck and Warp (Python parity: proximity >= 0.94)
             if anomaly.kind == AnomalyKind::Suck && proximity_m >= 0.94 && monster.cosmic_warp_cooldown <= 0.0 {
@@ -248,7 +254,7 @@ fn anomaly_apply_forces(
                     let out_y = 1.2 + rng.gen_range(0.32..0.82);
                     
                     m_tf.translation = Vec3::new(out_x, out_y, out_z);
-                    m_sp.w = rng.gen_range(-15.0..15.0);
+                    m_sp.w = rng.gen_range(-(hyper.w_limit * 0.95)..(hyper.w_limit * 0.95));
                     m_sp.target_w = m_sp.w;
                     m_sp.layer = (m_sp.w / 5.0).round() as i32;
                     

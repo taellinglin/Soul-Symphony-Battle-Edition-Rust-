@@ -16,6 +16,7 @@ impl Plugin for ProgressionPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
            .init_resource::<MonsterStats>()
+           .init_resource::<KillProtection>()
            .add_event::<GainXpEvent>()
            .add_event::<PlayerLevelUpEvent>()
            .add_event::<HealEvent>()
@@ -59,6 +60,18 @@ pub struct SaveData {
 #[derive(Resource)]
 pub struct GameOverTimer(pub Timer);
 
+#[derive(Resource)]
+pub struct KillProtection {
+    pub stacks: u32,
+    pub max_stacks: u32,
+}
+
+impl Default for KillProtection {
+    fn default() -> Self {
+        Self { stacks: 0, max_stacks: 24 }
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct MonsterStats {
     pub total: usize,
@@ -95,8 +108,8 @@ impl Default for PlayerProgression {
         Self {
             level: 1,
             xp: 0.0,
-            xp_next: 100.0,
-            xp_growth: 1.25,
+            xp_next: 12.0,
+            xp_growth: 1.28,
             stat_cycle_idx: 0,
         }
     }
@@ -283,7 +296,7 @@ fn sword_pickup_handler(
             match event.powerup_type.as_str() {
                 "attack" => {
                     stats.atk += 1;
-                    stats.sword_dmg_mult += 0.09;
+                    stats.sword_dmg_mult += 0.16;
                 }
                 "defense" => {
                     stats.def += 1;
@@ -347,7 +360,7 @@ fn player_death_check(
         if stats.hp <= 0.0 {
             progression.xp *= 0.5; // XP Penalty
             next_state.set(GameState::GameOver);
-            commands.insert_resource(GameOverTimer(Timer::from_seconds(5.0, TimerMode::Once)));
+            commands.insert_resource(GameOverTimer(Timer::from_seconds(10.0, TimerMode::Once)));
         }
     }
 }
@@ -409,7 +422,7 @@ fn save_progress_on_level_up(
                 critical_rem: buffs.critical.remaining_secs(),
             };
             if let Ok(json) = serde_json::to_string_pretty(&data) {
-                let _ = fs::write("save.json", json);
+                let _ = fs::write("assets/data/save_state.json", json);
             }
         }
     }
@@ -418,7 +431,7 @@ fn save_progress_on_level_up(
 fn load_progress(
     mut commands: Commands,
 ) {
-    if let Ok(json) = fs::read_to_string("save.json") {
+    if let Ok(json) = fs::read_to_string("assets/data/save_state.json") {
         if let Ok(data) = serde_json::from_str::<SaveData>(&json) {
             // We'll update the player components when they spawn, 
             // but since they spawn in Startup, we might need a Resource to hold this.

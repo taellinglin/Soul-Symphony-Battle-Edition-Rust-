@@ -26,7 +26,7 @@ pub(crate) fn spawn_monsters_on_map_load(
     commands.spawn(MapMonstersSpawned);
 
     let mut rng = thread_rng();
-    let num_monsters = 24; // Default count from original
+    let num_monsters = 8;
     let rooms = &graph.rooms;
     let room_count = rooms.len();
     if room_count == 0 { return; }
@@ -119,7 +119,7 @@ pub(crate) fn spawn_monsters_on_map_load(
         let fast_speed_boost = if rng.gen_bool(0.22) { rng.gen_range(2.0..3.4) } else { 1.0 };
         speed_scale *= speed_mult * fast_speed_boost;
 
-        let hyper_w_limit = 15.0;
+        let hyper_w_limit = 7.2;
         let w = rng.gen_range(-hyper_w_limit * 0.85 .. hyper_w_limit * 0.85);
         let radius = rng.gen_range(0.85..1.35) * size_scale;
         
@@ -214,8 +214,8 @@ pub(crate) fn spawn_monsters_on_map_load(
             },
             ExternalForce::default(),
             ExternalImpulse::default(),
-        )).id();
-        
+        )).insert(KnockbackVel::default()).id();
+
         // Spawn 2-4 parts
         let part_count = rng.gen_range(2..=4);
         for _ in 0..part_count {

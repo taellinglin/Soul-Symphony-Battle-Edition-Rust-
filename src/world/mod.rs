@@ -2,6 +2,7 @@ pub mod items;
 pub mod anomalies;
 pub mod buoyancy;
 pub mod boss;
+pub mod water_crystals;
 
 use bevy::prelude::*;
 
@@ -14,6 +15,7 @@ impl Plugin for WorldPlugin {
             anomalies::AnomalyPlugin,
             buoyancy::BuoyancyPlugin,
             boss::BossPlugin,
+            water_crystals::WaterCrystalPlugin,
         ));
     }
 }

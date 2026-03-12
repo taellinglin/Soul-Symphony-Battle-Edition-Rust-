@@ -6,7 +6,7 @@ pub use components::*;
 
 use bevy::prelude::*;
 use crate::player::{PlayerStats, Player};
-use crate::systems::progression::PlayerProgression;
+use crate::systems::progression::{PlayerProgression, GameState};
 
 pub struct UiPlugin;
 
@@ -21,7 +21,8 @@ impl Plugin for UiPlugin {
             setup_network_debug_ui
         ))
            .add_systems(Update, (
-               hud::update_ui, minimap::update_minimap, 
+               hud::update_ui, minimap::update_minimap,
+               update_game_over_ui_visibility,
                update_client_list_ui, update_network_debug_ui,
                update_game_over_countdown, hud::update_monster_hud_text,
                hud::update_boss_room_ui, hud::update_input_hud
@@ -85,6 +86,16 @@ fn setup_game_over_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             GameOverPrompt,
         ));
     });
+}
+
+fn update_game_over_ui_visibility(
+    state: Res<State<GameState>>,
+    mut query: Query<&mut Visibility, With<GameOverUi>>,
+) {
+    let visible = *state.get() == GameState::GameOver;
+    for mut vis in query.iter_mut() {
+        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+    }
 }
 
 fn update_game_over_countdown(

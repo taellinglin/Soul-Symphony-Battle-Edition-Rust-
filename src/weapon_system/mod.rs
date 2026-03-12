@@ -6,13 +6,19 @@ pub use components::*;
 use bevy::prelude::*;
 use bevy::render::view::{NoFrustumCulling, RenderLayers};
 use crate::components::Spatial4D;
+use std::collections::VecDeque;
 
 pub struct WeaponSystemPlugin;
 
+#[derive(Resource, Default)]
+struct BladeEchoQueue {
+    ents: VecDeque<Entity>,
+}
 
 impl Plugin for WeaponSystemPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<DamageEvent>()
+           .init_resource::<BladeEchoQueue>()
            .add_systems(Update, (
                combat::update_weapon_state,
                combat::apply_damage_events,
@@ -30,42 +36,63 @@ fn spawn_blade_echoes(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut queue: ResMut<BladeEchoQueue>,
+    time: Res<Time>,
 ) {
     for (mut weapon, tf) in query.iter_mut() {
-        if weapon.state != WeaponState::Idle && weapon.echo_timer <= 0.0 {
-            weapon.echo_timer = 1.0 / 115.0; // Echo frequency
-            
-            // Purple-ish echo material
-            let color = Color::srgba(0.28, 0.04, 0.52, 0.5);
-            let echo_mat = materials.add(StandardMaterial {
-                base_color: color,
-                unlit: true,
-                alpha_mode: AlphaMode::Blend,
+        // Python parity: blade echoes emit during swing/spin only
+        if !matches!(weapon.state, WeaponState::Swing | WeaponState::Spin) {
+            continue;
+        }
+
+        weapon.echo_timer -= time.delta_seconds();
+        if weapon.echo_timer > 0.0 {
+            continue;
+        }
+        weapon.echo_timer = 1.0 / 120.0;
+
+        // Python parity: 7-color cycle
+        const COLORS: [Vec3; 7] = [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.5, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.29, 0.0, 0.51),
+            Vec3::new(0.56, 0.0, 1.0),
+        ];
+        let idx = (weapon.echo_cycle as usize) % COLORS.len();
+        weapon.echo_cycle = weapon.echo_cycle.wrapping_add(1);
+        let c = COLORS[idx];
+
+        let mat = materials.add(StandardMaterial {
+            base_color: Color::srgba(c.x, c.y, c.z, 0.86),
+            emissive: LinearRgba::new(c.x.min(1.0), c.y.min(1.0), c.z.min(1.0), 1.0),
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        });
+
+        // Python parity: stretched blade-shaped box
+        let echo_scale = Vec3::new(0.095 * SWORD_SCALE, 0.072 * SWORD_SCALE, 0.74 * SWORD_SCALE);
+        let ent = commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+                material: mat,
+                transform: Transform::from_translation(tf.translation)
+                    .with_rotation(tf.rotation)
+                    .with_scale(echo_scale),
                 ..default()
-            });
+            },
+            BladeEcho { life: 0.4, max_life: 0.4, color: c },
+            NoFrustumCulling,
+            RenderLayers::layer(2),
+        )).id();
 
-            // Triple-box parts (Blade, Guard, Handle)
-            let parts = [
-                (Cuboid::new(0.12 * SWORD_GEO_SCALE, 0.035 * SWORD_GEO_SCALE, 1.48 * SWORD_GEO_SCALE), Transform::from_xyz(0.0, 0.0, -0.74 * SWORD_GEO_SCALE)),
-                (Cuboid::new(0.48 * SWORD_GEO_SCALE, 0.12 * SWORD_GEO_SCALE, 0.06 * SWORD_GEO_SCALE), Transform::from_xyz(0.0, 0.0, 0.0)),
-                (Cuboid::new(0.08 * SWORD_GEO_SCALE, 0.08 * SWORD_GEO_SCALE, 0.44 * SWORD_GEO_SCALE), Transform::from_xyz(0.0, 0.0, 0.22 * SWORD_GEO_SCALE)),
-            ];
-
-            for (mesh_shape, local_tf) in parts {
-                let world_tf = Transform::from_translation(tf.transform_point(local_tf.translation))
-                    .with_rotation(tf.rotation * local_tf.rotation);
-                
-                commands.spawn((
-                    PbrBundle {
-                        mesh: meshes.add(mesh_shape),
-                        material: echo_mat.clone(),
-                        transform: world_tf,
-                        ..default()
-                    },
-                    BladeEcho { life: 0.38, max_life: 0.38 },
-                    NoFrustumCulling,
-                    RenderLayers::layer(2),
-                ));
+        queue.ents.push_back(ent);
+        while queue.ents.len() > 16 {
+            if let Some(old) = queue.ents.pop_front() {
+                commands.entity(old).despawn_recursive();
             }
         }
     }
@@ -84,8 +111,13 @@ fn update_blade_echoes(
             commands.entity(entity).despawn_recursive();
         } else if let Some(mat) = materials.get_mut(mat_handle.id()) {
             let t = (1.0 - (echo.life / echo.max_life)).clamp(0.0, 1.0);
-            let alpha = (1.0 - t) * 0.86;
-            mat.base_color.set_alpha(alpha);
+            let fade = (1.0 - t).max(0.0);
+            let white_mix = (1.0 - t * 1.8).max(0.0);
+            let c = echo.color;
+            let r = c.x * (1.0 - white_mix) + 1.0 * white_mix;
+            let g = c.y * (1.0 - white_mix) + 1.0 * white_mix;
+            let b = c.z * (1.0 - white_mix) + 1.0 * white_mix;
+            mat.base_color = Color::srgba(r, g, b, fade * 0.86);
         }
     }
 }

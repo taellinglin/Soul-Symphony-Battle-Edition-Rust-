@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy::render::view::{NoFrustumCulling, RenderLayers};
 use bevy_rapier3d::prelude::*;
+use rand::Rng;
 use crate::components::{Spatial4D, Health};
+use crate::ai::{Monster, MonsterVariant, AiState};
 
 use super::components::*;
 
@@ -11,26 +13,30 @@ pub(crate) fn update_weapon_state(
         Query<(&mut Weapon, &mut Transform, &mut Spatial4D)>,
         Query<(Entity, &Weapon, &Transform)>,
     )>,
-    player_query: Query<(&Transform, &Spatial4D), (With<crate::player::Player>, Without<Weapon>)>,
-    enemy_query: Query<(Entity, &Transform, &Spatial4D, &crate::components::Health), (Without<Weapon>, Without<crate::player::Player>)>,
+    player_query: Query<(&Transform, &Spatial4D, Option<&crate::systems::progression::PlayerCombatStats>), (With<crate::player::Player>, Without<Weapon>)>,
+    enemy_query: Query<(Entity, &Transform, &Spatial4D, &crate::components::Health, &Monster), (Without<Weapon>, Without<crate::player::Player>)>,
     gravity: Res<crate::player::GravityDirection>,
     orbit: Res<crate::player::CameraOrbitState>,
     timers: Res<crate::player::PhysicsTimers>,
     time: Res<Time>,
     mut sfx_events: EventWriter<crate::effects::audio::PlaySfxEvent>,
     mut damage_events: EventWriter<DamageEvent>,
+    mut fx_events: EventWriter<crate::effects::FloatingTextEvent>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let dt = time.delta_seconds();
-    let Ok((player_tf, player_sp)) = player_query.get_single() else { return };
+    let Ok((player_tf, player_sp, opt_stats)) = player_query.get_single() else { return };
+    let dmg_mult = opt_stats
+        .map(|s| s.sword_dmg_mult.max(0.5) * 1.0_f32.max(0.55))
+        .unwrap_or(0.55);
     let input_up = -gravity.0.normalize_or_zero();
 
     // 1. Update Weapon Motion
     {
         for (mut weapon, mut tf, mut weapon_sp) in weapon_set.p0().iter_mut() {
             // Sync weapon Spatial4D to player's (so 4D slice doesn't cull it)
-            if let Ok((_, player_sp)) = player_query.get_single() {
+            if let Ok((_, player_sp, _)) = player_query.get_single() {
                 weapon_sp.w = player_sp.w;
                 weapon_sp.target_w = player_sp.target_w;
                 weapon_sp.layer = player_sp.layer;
@@ -64,7 +70,7 @@ pub(crate) fn update_weapon_state(
                 + new_fwd * FWD_OFFSET 
                 + right * SIDE_OFFSET;
 
-            let follow_alpha = 1.0 - (-dt * 24.0).exp(); // Fast follow for now
+            let follow_alpha = 1.0 - (-dt * 19.0).exp();
             let new_anchor = weapon.anchor_pos + (desired_anchor - weapon.anchor_pos) * follow_alpha;
             weapon.anchor_pos = new_anchor;
             // clamp z above floor? Skip for now
@@ -86,7 +92,7 @@ pub(crate) fn update_weapon_state(
                 }
                 WeaponState::Swing => {
                     weapon.timer += dt;
-                    let total = 0.35;
+                    let total = 0.18;
                     let t = (weapon.timer / total).min(1.0);
                     yaw_offset = -96.0 + 192.0 * t;
                     // Python: pitch = -20.0 + 8.0 * math.sin(t * math.pi)
@@ -112,7 +118,7 @@ pub(crate) fn update_weapon_state(
                                         MaterialMeshBundle {
                                             mesh: meshes.add(Cuboid::new(0.04, 0.001, 1.8)),
                                             material: materials.add(StandardMaterial {
-                                                base_color: Color::srgba(0.24, 0.95, 1.0, 0.68),
+                                                base_color: Color::srgba(1.0, 1.0, 1.0, 0.72),
                                                 unlit: true,
                                                 alpha_mode: AlphaMode::Blend,
                                                 ..default()
@@ -121,7 +127,7 @@ pub(crate) fn update_weapon_state(
                                                 .with_rotation(Quat::from_euler(EulerRot::YXZ, trail_yaw.to_radians(), trail_pitch.to_radians(), 0.0)),
                                             ..default()
                                         },
-                                        SlashTrail { life: 0.14, max_life: 0.14 },
+                                        SlashTrail { life: 0.16, max_life: 0.16 },
                                         NoFrustumCulling,
                                         RenderLayers::layer(2),
                                     ));
@@ -141,7 +147,7 @@ pub(crate) fn update_weapon_state(
                 }
                 WeaponState::Spin => {
                     weapon.timer += dt;
-                    let total = 0.54; // from spin_duration
+                    let total = 0.32;
                     let t = (weapon.timer / total).min(1.0);
                     yaw_offset = -180.0 + 540.0 * t;
                     pitch = -14.0;
@@ -219,7 +225,7 @@ pub(crate) fn update_weapon_state(
                         },
                         Hyperbomb {
                             timer: 0.0,
-                            duration: 2.6,
+                            duration: 6.0,
                             radius: 0.1,
                             max_radius: ball_r * 8.2, // hyperbomb_max_scale_factor
                         },
@@ -292,7 +298,7 @@ pub(crate) fn update_weapon_state(
             let throw_rad = 0.95 + SWORD_SCALE * 0.22;
             let swing_fwd = weapon.weapon_forward; // Simplified swing fwd check
 
-            for (enemy_ent, enemy_tf, enemy_sp, enemy_hp) in enemy_query.iter() {
+            for (enemy_ent, enemy_tf, enemy_sp, enemy_hp, monster) in enemy_query.iter() {
                 if enemy_hp.current <= 0.0 { continue; }
                 if weapon.hit_targets.contains(&enemy_ent) { continue; }
 
@@ -300,7 +306,7 @@ pub(crate) fn update_weapon_state(
                 let mut planar = to_enemy;
                 planar.y = 0.0;
                 let planar_dist = planar.length();
-                let enemy_radius = 1.0; // Assume 1.0 for now
+                let enemy_radius = 1.0;
 
                 let dw_scaled = (enemy_sp.w - player_sp.w) * 4.0;
                 let dist_4d = (planar_dist * planar_dist + dw_scaled * dw_scaled).sqrt();
@@ -311,10 +317,10 @@ pub(crate) fn update_weapon_state(
                 let mut away = to_enemy;
 
                 if is_throw {
-                    let max_hit = throw_rad + enemy_radius * 0.72;
+                    let max_hit = throw_rad + enemy_radius;
                     if dist_4d <= max_hit {
                         register_hit = true;
-                        damage = 44.0 * 0.55; // base * dmg_mult
+                        damage = 44.0 * dmg_mult;
                         knock_mag = 4.8;
                     }
                 } else {
@@ -325,23 +331,44 @@ pub(crate) fn update_weapon_state(
                                 let planar_dir = planar.normalize();
                                 if planar_dir.dot(swing_fwd) >= 0.12 {
                                     register_hit = true;
-                                    damage = 36.0 * 0.55;
+                                    damage = 36.0 * dmg_mult;
                                     knock_mag = 3.8;
                                 }
                             }
                         } else {
                             register_hit = true;
-                            damage = 54.0 * 0.55;
+                            damage = 54.0 * dmg_mult;
                             knock_mag = 5.4;
                         }
                     }
                 }
 
                 if register_hit {
+                    let guard_chance = match monster.state {
+                        AiState::Guarding => 0.58 + if matches!(monster.variant, MonsterVariant::Juggernaut | MonsterVariant::Vanguard) { 0.18 } else { 0.0 },
+                        AiState::Attacking => 0.20 + if matches!(monster.variant, MonsterVariant::Juggernaut | MonsterVariant::Vanguard) { 0.18 } else { 0.0 },
+                        _ => 0.0,
+                    };
+                    if guard_chance > 0.0 && rand::thread_rng().gen::<f32>() < guard_chance {
+                        sfx_events.send(crate::effects::audio::PlaySfxEvent {
+                            kind: crate::effects::audio::SfxKind::MonsterHit,
+                            volume: 0.5, pitch: 0.9, position: Some(enemy_tf.translation),
+                        });
+                        fx_events.send(crate::effects::FloatingTextEvent {
+                            pos: enemy_tf.translation + Vec3::new(0.0, 1.1, 0.0),
+                            text: "GUARD".to_string(),
+                            color: Color::srgba(0.9, 0.85, 0.3, 1.0),
+                            scale: 0.28,
+                            life: 0.5,
+                        });
+                        continue;
+                    }
+                    let applied = (damage / monster.defense).max(1.0);
                     away.y = 0.0;
                     if away.length_squared() > 1e-6 { away = away.normalize(); }
-                    let knockback = away * knock_mag + Vec3::Y * 0.35; // Slight pop-up
-                    hits.push((weapon_ent, enemy_ent, damage, knockback));
+                    let pop_up = if is_throw { 0.42 } else { 0.35 };
+                    let knockback = away * knock_mag + Vec3::Y * pop_up;
+                    hits.push((weapon_ent, enemy_ent, applied, knockback));
                 }
             }
         }
@@ -354,7 +381,7 @@ pub(crate) fn update_weapon_state(
         }
         
         // Ensure enemy tf is readable here -> it is.
-        if let Ok((_, enemy_tf, _, _)) = enemy_query.get(enemy_ent) {
+        if let Ok((_, enemy_tf, _, _, _)) = enemy_query.get(enemy_ent) {
             sfx_events.send(crate::effects::audio::PlaySfxEvent {
                 kind: crate::effects::audio::SfxKind::MonsterHit,
                 volume: 0.8, pitch: 1.0, position: Some(enemy_tf.translation),
@@ -373,20 +400,22 @@ pub(crate) fn apply_damage_events(
     mut events: EventReader<DamageEvent>,
     mut item_events: EventWriter<crate::world::items::SpawnItemEvent>,
     mut commands: Commands,
-    mut query: Query<(&mut Health, &Transform, Option<&crate::ai::Monster>, Option<&mut Velocity>)>,
+    mut query: Query<(&mut Health, &Transform, Option<&crate::ai::Monster>, Option<&mut Velocity>, Option<&mut crate::ai::KnockbackVel>)>,
     mut sfx_events: EventWriter<crate::effects::audio::PlaySfxEvent>,
     mut fx_events: EventWriter<crate::effects::FloatingTextEvent>,
     mut monster_stats: ResMut<crate::systems::progression::MonsterStats>,
+    mut kill_protection: ResMut<crate::systems::progression::KillProtection>,
 ) {
     for ev in events.read() {
-        if let Ok((mut health, tf, opt_monster, mut opt_vel)) = query.get_mut(ev.target) {
+        if let Ok((mut health, tf, opt_monster, opt_vel, opt_knock)) = query.get_mut(ev.target) {
             health.current -= ev.amount;
-            
-            if let Some(vel) = opt_vel.as_mut() {
+
+            if let Some(mut knock) = opt_knock {
+                knock.0 += ev.knockback;
+            } else if let Some(mut vel) = opt_vel {
                 vel.linvel += ev.knockback;
             }
 
-            // Python parity: spawn "HP -{dmg}" floating text above monster
             fx_events.send(crate::effects::FloatingTextEvent {
                 pos: tf.translation + Vec3::new(0.0, 1.1, 0.0),
                 text: format!("HP -{}", ev.amount as i32),
@@ -394,20 +423,17 @@ pub(crate) fn apply_damage_events(
                 scale: 0.24,
                 life: 0.7,
             });
-            
+
             if health.current <= 0.0 {
-                // Determine XP amount from monster variant
-                let xp_amount = if let Some(m) = opt_monster {
-                    match m.variant {
-                        crate::ai::MonsterVariant::Normal => 12.0,
-                        crate::ai::MonsterVariant::Juggernaut => 45.0,
-                        crate::ai::MonsterVariant::Vanguard => 32.0,
-                        crate::ai::MonsterVariant::Raider => 24.0,
-                        crate::ai::MonsterVariant::Giant => 85.0,
-                    }
-                } else {
-                    8.0
-                };
+                kill_protection.stacks = (kill_protection.stacks + 1).min(kill_protection.max_stacks);
+                let base_xp = 2.0 + health.max * 0.04;
+                let variant_mult = opt_monster.map(|m| match m.variant {
+                    crate::ai::MonsterVariant::Juggernaut | crate::ai::MonsterVariant::Vanguard => 1.45,
+                    crate::ai::MonsterVariant::Raider => 1.25,
+                    crate::ai::MonsterVariant::Giant => 1.75,
+                    crate::ai::MonsterVariant::Normal => 1.0,
+                }).unwrap_or(1.0);
+                let xp_amount = base_xp * variant_mult;
                 item_events.send(crate::world::items::SpawnItemEvent::Exp {
                     pos: tf.translation,
                     amount: xp_amount,

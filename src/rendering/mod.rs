@@ -26,6 +26,7 @@ impl Plugin for RenderingPlugin {
         ));
         app.add_systems(Update, (
             sync_material_uniforms,
+            update_floor_wetness,
         ).run_if(in_state(crate::systems::progression::GameState::Playing)));
     }
 }
@@ -200,10 +201,11 @@ impl Default for HyperSliceSettings {
             room_uv_scale: 0.32,
             time: 0.0,
             persistence: 0.0,
-            fog_start: 0.8,
-            fog_end: 18.0, // Match original Python parity
+            // Original parity (main.py camera fog): black fog, range 0..35
+            fog_start: 0.0,
+            fog_end: 35.0,
             edge_color: LinearRgba::new(0.0, 1.0, 1.0, 1.0),
-            fog_color: LinearRgba::new(0.1, 0.12, 0.17, 1.0),
+            fog_color: LinearRgba::BLACK,
         }
     }
 }
@@ -338,11 +340,12 @@ impl Default for WaterSurfaceSettings {
             corridor_w: 2.45,   // Python parity: u_corridor_w
             level_z_step: 6.0,
             static_uv: 1.0, // Python: water_static_uv = True
-            fog_start: 0.8, // Python parity: u_fog_start
-            fog_end: 18.0,  // Python parity: u_fog_end
+            // Original parity (main.py camera fog): black fog, range 0..35
+            fog_start: 0.0,
+            fog_end: 35.0,
             reflection_strength: 0.0, // Python parity: disabled for clean ocean feel
             time: 0.0,
-            fog_color: LinearRgba::new(0.1, 0.12, 0.17, 1.0),
+            fog_color: LinearRgba::BLACK,
         }
     }
 }

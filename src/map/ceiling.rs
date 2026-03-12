@@ -3,34 +3,14 @@ use bevy::prelude::*;
 use super::types::CeilingEntity;
 
 pub(crate) fn setup_ceiling(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<crate::rendering::CeilingMaterial>>,
+    _commands: Commands,
+    _meshes: ResMut<Assets<Mesh>>,
+    _materials: ResMut<Assets<crate::rendering::CeilingMaterial>>,
 ) {
-    /* // Enabled for mirrored parity in arena mode
-    if config.layout_mode == "arena" {
-        return;
-    }
-    */
-    commands.spawn((
-        CeilingEntity,
-        MaterialMeshBundle {
-            mesh: meshes.add(Plane3d::default().mesh().size(2500.0, 2500.0)),
-            material: materials.add(crate::rendering::CeilingMaterial {
-                base: StandardMaterial {
-                    base_color: Color::srgb(0.1, 0.1, 0.12),
-                    unlit: true,
-                    cull_mode: None, // Visible from below
-                    ..default()
-                },
-                extension: crate::rendering::CeilingExtension {
-                    settings: crate::rendering::CeilingSettings::default(),
-                },
-            }),
-            transform: Transform::from_xyz(0.0, 50.0, 0.0).with_rotation(Quat::from_rotation_x(std::f32::consts::PI)),
-            ..default()
-        },
-    ));
+    // Original parity uses an inverted level echo (mirrored world) rather than a bespoke ceiling plane.
+    // The mirrored look is approximated by spawning a second water surface above in `map/mod.rs`,
+    // so we disable the standalone ceiling plane to avoid conflicting visuals.
+    // Intentionally no-op.
 }
 
 pub(crate) fn update_ceiling(

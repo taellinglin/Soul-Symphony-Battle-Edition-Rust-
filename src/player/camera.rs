@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
+use crate::map::GenerationConfig;
 use crate::components::{Spatial4D, CompressionState};
 
 use super::components::*;
@@ -19,6 +20,7 @@ pub(crate) fn sync_camera(
     mut mouse_motion: EventReader<bevy::input::mouse::MouseMotion>,
     rapier_context: Res<RapierContext>,
     dungeon_graph: Res<crate::map::DungeonGraph>,
+    config: Res<GenerationConfig>,
     time: Res<Time>,
     obstacle_query: Query<Entity, With<crate::components::CameraObstacle>>,
 ) {
@@ -42,24 +44,23 @@ pub(crate) fn sync_camera(
     }
     ref_forward = ref_forward.normalize();
 
-    // ── Mouse camera turn — original parity with smoothing ──
-    // Python: _consume_mouse_look smooth = 0.62, keep = 0.38
     let mut raw_h = 0.0_f32;
     let mut raw_p = 0.0_f32;
     for ev in mouse_motion.read() {
-        raw_h -= ev.delta.x * 0.15; // sensitivity parity
-        raw_p += ev.delta.y * 0.15;
+        // Use mouse X to control heading (horizontal orbit)
+        raw_h -= ev.delta.x * 0.16;
+        // Ignore mouse Y for normal chase camera (match original main.py orbit_dir usage)
+        raw_p += 0.0 * ev.delta.y;
     }
 
     let smooth = 0.62_f32; // original parity: mouse_look_smooth
     let keep = 1.0 - smooth;
     orbit.heading_input = orbit.heading_input * smooth + raw_h * keep;
-    orbit.pitch_input = orbit.pitch_input * smooth + raw_p * keep;
+    // Freeze pitch in normal chase mode; do not drive it from mouse
+    orbit.pitch_input = 0.0;
 
-    if orbit.heading_input.abs() > 1e-6 || orbit.pitch_input.abs() > 1e-6 {
+    if orbit.heading_input.abs() > 1e-6 {
         orbit.heading += orbit.heading_input;
-        orbit.pitch += orbit.pitch_input;
-        orbit.pitch = orbit.pitch.clamp(6.0, 80.0);
         orbit.manual_turn_hold = 0.22; // Keep auto-align disabled while moving
     } else {
         orbit.manual_turn_hold = (orbit.manual_turn_hold - dt).max(0.0);
@@ -89,27 +90,20 @@ pub(crate) fn sync_camera(
     let height = CAMERA_HEIGHT_OFFSET * (1.0 + (compression - 1.0) * 0.2);
     let fov = CAMERA_FOV_BASE * (1.0 - (compression - 1.0) * 0.1);
 
-    // ── Orbit direction via Rodrigues rotation (Python: _rotate_around_axis(-ref_forward, gravity_up, yaw)) ──
+    // ── Orbit direction (matches original main.py L16979–16986) ──
     let yaw_rad = orbit.heading.to_radians();
-    let _pitch_rad = orbit.pitch.to_radians();
-    let orbit_planar = rotate_around_axis(-ref_forward, gravity_up, yaw_rad);
-    // Python: orbit_dir is purely horizontal; the vertical offset comes from camera_height_offset.
-    // But we also need to apply pitch to compute the actual camera offset direction.
-    // Python: desired_cam_pos = target + orbit_dir * camera_follow_distance
-    // where target = ball_pos + gravity_up * camera_height_offset
-    // This means the camera is at the same height as the target. The pitch in Python
-    // is only used for the camera_orbit_position mode (not the normal mode).
-    let orbit_dir = orbit_planar.normalize_or_zero();
+    let mut orbit_dir = rotate_around_axis(-ref_forward, gravity_up, yaw_rad);
+    if orbit_dir.length_squared() < 1e-8 {
+        orbit_dir = -Vec3::Z;
+    } else {
+        orbit_dir = orbit_dir.normalize();
+    }
     orbit.smoothed_dir = orbit_dir;
 
     if let Ok((mut camera_tf, mut projection)) = camera_query.get_single_mut() {
-        // Python camera_orbit_position (camera.py L47):
-        // offset = back_dir * (cos(pitch_rad) * dist) + up_axis * (sin(pitch_rad) * dist)
+        // Original: target at fixed height above ball, camera at fixed follow distance along orbit_dir
         let target = ball_pos + gravity_up * height;
-        let pitch_rad = orbit.pitch.to_radians();
-        let horizontal_offset = orbit_dir * (follow_dist * pitch_rad.cos());
-        let vertical_offset = gravity_up * (follow_dist * pitch_rad.sin());
-        let desired_cam_pos = target + horizontal_offset + vertical_offset;
+        let desired_cam_pos = target + orbit_dir * follow_dist;
 
         // ── Smooth camera follow (original line 16976) ──
         let mut cam_pos = match orbit.smoothed_pos {
@@ -184,7 +178,7 @@ pub(crate) fn sync_camera(
         let cam_dist_planar = to_cam_planar.length();
         if cam_dist_planar < CAMERA_BALL_CLEARANCE {
             if cam_dist_planar < 1e-6 {
-                to_cam_planar = orbit_dir;
+                to_cam_planar = orbit.smoothed_dir;
             }
             let push = to_cam_planar.normalize() * CAMERA_BALL_CLEARANCE;
             resolved_cam.x = ball_pos.x + push.x;
@@ -193,7 +187,7 @@ pub(crate) fn sync_camera(
 
         // ── Room-bounds clamping (Python: _clamp_camera_to_current_room_bounds) ──
         // Find the room containing the ball and clamp camera XZ within it
-        {
+        if config.layout_mode != "arena" {
             let margin = 0.5_f32;
             let ball_xz = Vec2::new(ball_pos.x, ball_pos.z);
             let mut best_room: Option<&crate::map::Room> = None;

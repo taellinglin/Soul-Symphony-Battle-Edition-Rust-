@@ -25,6 +25,7 @@ impl Plugin for AiPlugin {
             move_enemy_projectiles,
             update_lifetimes,
             apply_monster_w_velocity,
+            monster_knockback_decay,
             monster_collision_damage,
         ).chain());
     }
@@ -394,9 +395,22 @@ fn apply_monster_w_velocity(
     }
 }
 
+fn monster_knockback_decay(
+    time: Res<Time>,
+    mut query: Query<(&mut Velocity, &mut KnockbackVel), With<Monster>>,
+) {
+    let dt = time.delta_seconds();
+    let decay = (1.0 - dt * 7.5).max(0.0);
+    for (mut vel, mut knock) in query.iter_mut() {
+        vel.linvel += knock.0;
+        knock.0 *= decay;
+    }
+}
+
 fn monster_collision_damage(
     mut player_query: Query<(&Transform, &Spatial4D, &mut crate::player::PlayerStats), With<Player>>,
     mut jump: ResMut<crate::player::JumpState>,
+    mut kill_protection: ResMut<crate::systems::progression::KillProtection>,
     monster_query: Query<(&Transform, &Spatial4D, &Monster)>,
     projectile_query: Query<(Entity, &Transform, &Spatial4D), With<crate::components::EnemyProjectile>>,
     mut fx_events: EventWriter<crate::effects::FloatingTextEvent>,
@@ -406,9 +420,14 @@ fn monster_collision_damage(
     let Ok((player_tf, player_sp, mut stats)) = player_query.get_single_mut() else { return };
     if jump.player_damage_cooldown > 0.0 { return; }
 
+    if kill_protection.stacks > 0 {
+        kill_protection.stacks -= 1;
+        return;
+    }
+
     let p_pos = player_tf.translation;
-    
-    // 1. Monster Contact Damage (Parity with main.py:10865)
+
+    // 1. Monster Contact Damage
     for (m_tf, m_sp, monster) in monster_query.iter() {
         if (m_sp.layer - player_sp.layer).abs() > 0 { continue; }
         
@@ -416,8 +435,8 @@ fn monster_collision_damage(
         if dist < 1.4 { // ball_radius(0.68) + monster_radius(0.7 approx)
             let dmg = 12.0 * monster.attack_mult;
             stats.hp -= dmg;
-            jump.player_damage_cooldown = 0.8;
-            
+            jump.player_damage_cooldown = 0.45;
+
             fx_events.send(crate::effects::FloatingTextEvent {
                 pos: p_pos + Vec3::Y * 1.5,
                 text: format!("HP -{}", dmg as i32),
@@ -440,8 +459,8 @@ fn monster_collision_damage(
          let dist = p_pos.distance(proj_tf.translation);
          if dist < 1.1 {
             stats.hp -= 15.0;
-            jump.player_damage_cooldown = 0.8;
-            
+            jump.player_damage_cooldown = 0.45;
+
             fx_events.send(crate::effects::FloatingTextEvent {
                 pos: p_pos + Vec3::Y * 1.5,
                 text: format!("HP -15"),

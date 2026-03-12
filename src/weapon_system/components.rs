@@ -12,6 +12,7 @@ pub struct Weapon {
     pub prev_tip_pos: Option<Vec3>,
     pub slash_timer: f32,
     pub echo_timer: f32,
+    pub echo_cycle: u32,
 }
 
 impl Default for Weapon {
@@ -27,6 +28,7 @@ impl Default for Weapon {
             prev_tip_pos: None,
             slash_timer: 0.0,
             echo_timer: 0.0,
+            echo_cycle: 0,
         }
     }
 }
@@ -53,6 +55,7 @@ pub struct DamageEvent {
 pub struct BladeEcho {
     pub life: f32,
     pub max_life: f32,
+    pub color: Vec3,
 }
 
 #[derive(Component)]

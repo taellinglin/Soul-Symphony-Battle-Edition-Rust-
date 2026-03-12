@@ -63,7 +63,7 @@ pub(crate) fn spawn_player(
     let ball_material = ball_materials.add(crate::rendering::BallMaterial {
         base: StandardMaterial {
             base_color: Color::srgba(1.0, 1.0, 1.0, 1.0),
-            emissive: LinearRgba::new(8.0, 0.5, 0.5, 1.0), // Boosted for Bloom glow
+            emissive: LinearRgba::new(0.26, 0.33, 0.46, 1.0),
             alpha_mode: AlphaMode::Opaque,
             unlit: false, // Changed to false to allow some PBR shading interaction
             ..default()
@@ -355,22 +355,30 @@ pub(crate) fn spawn_player(
 
 pub(crate) fn teleport_to_start(
     graph: Res<crate::map::DungeonGraph>,
+    config: Res<crate::map::GenerationConfig>,
     mut player_query: Query<(&mut Transform, &mut Spatial4D, &mut Velocity), (With<Player>, Without<Weapon>)>,
     mut weapon_query: Query<(&mut Transform, &mut Spatial4D, &mut Weapon), Without<Player>>,
     mut initialized: Local<bool>,
 ) {
     if *initialized { return; }
 
-    if let Some(first_room) = graph.rooms.first() {
-        let center = first_room.center();
-        let w = (first_room.w_layer as f32) * 5.0;
-        let layer = first_room.w_layer;
+    // Original parity: main startup spawn uses `platform_course_spawn_pos`:
+    // (map_w/2, map_d/2, floor_y + 3.0). See `original/main.py:603` and init placement `main.py:1196–1201`.
+    let map_w = (176.0 * config.scale) as f32;
+    let spawn_x = map_w * 0.5;
+    let spawn_z = map_w * 0.5;
+    let spawn_y = 3.0; // floor_y + 3.0 (Bevy Y is height)
+    let w = 0.0;
+    let layer = 0;
 
-        if let Ok((mut tf, mut sp, mut vel)) = player_query.get_single_mut() {
-            info!("Teleporting player to start: x={:.2}, z={:.2}, w={:.1}", center.x, center.y, w);
-            tf.translation.x = center.x;
-            tf.translation.z = center.y;
-            tf.translation.y = 2.0; // Python parity: ball sits on floor at ball_radius + floor_y ≈ 0.68
+    if let Ok((mut tf, mut sp, mut vel)) = player_query.get_single_mut() {
+            info!(
+                "Teleporting player to original spawn: x={:.2}, z={:.2}, y={:.2}, w={:.1} (rooms={})",
+                spawn_x, spawn_z, spawn_y, w, graph.rooms.len()
+            );
+            tf.translation.x = spawn_x;
+            tf.translation.z = spawn_z;
+            tf.translation.y = spawn_y;
             sp.w = w;
             sp.target_w = w;
             sp.layer = layer;
@@ -389,7 +397,4 @@ pub(crate) fn teleport_to_start(
         } else {
             error!("Player query failed in teleport_to_start");
         }
-    } else {
-        error!("No rooms available in DungeonGraph yet for teleport_to_start");
-    }
 }

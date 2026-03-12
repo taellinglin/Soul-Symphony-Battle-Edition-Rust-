@@ -54,18 +54,18 @@ impl Default for GenerationConfig {
             maze_layers: 1,
             maze_loop_chance: 0.15,
             maze_vertical_link_chance: 0.13,
-            average_room_size: 120.0, // MASSIVE open space feel
-            room_size_jitter: 0.85,
-            room_height: 4096.0, 
-            wall_thickness: 0.2, 
+            average_room_size: 13.0,
+            room_size_jitter: 0.62,
+            room_height: 4096.0,
+            wall_thickness: 0.2,
             floor_thickness: 0.2,
-            corridor_width: 32.5, 
-            room_density: 0.88,
-            corridor_density: 0.15, // Fewer narrow corridors
-            decor_density: 0.1,
-            angled_room_ratio: 0.1,
+            corridor_width: 15.5,
+            room_density: 0.68,
+            corridor_density: 0.64,
+            decor_density: 0.3,
+            angled_room_ratio: 0.2,
             base_cube_unit: 1.0,
-            max_rooms: 12,
+            max_rooms: 64,
         }
     }
 }

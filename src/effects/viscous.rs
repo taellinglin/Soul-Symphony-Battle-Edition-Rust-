@@ -73,8 +73,8 @@ impl Default for ViscousSettings {
             speed_norm: 0.0,
             strength: 0.0,
             bloom_strength: 0.0,
-            bloom_radius: 1.5,
-            bloom_threshold: 0.6,
+            bloom_radius: 0.9,
+            bloom_threshold: 0.52,
             quantize_steps: 8.0, // Match the "9 bands" aesthetic (roughly)
             outline_strength: 1.2, // Match CartoonInk separation 1.2
         }
@@ -248,6 +248,6 @@ fn update_viscous_distortion(
         settings.bloom_radius = 0.9;
         settings.bloom_threshold = 0.52;
         settings.quantize_steps = 0.0; // Disabled parity
-        settings.outline_strength = 0.0; // User requested removal
+        settings.outline_strength = 1.2;
     }
 }

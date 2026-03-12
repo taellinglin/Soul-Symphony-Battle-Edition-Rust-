@@ -53,7 +53,7 @@ impl Default for CameraOrbitState {
         Self {
             smoothed_dir: -Vec3::Z,
             heading: 0.0,
-            pitch: 24.0,
+            pitch: 14.0,
             heading_input: 0.0,
             pitch_input: 0.0,
             manual_turn_hold: 0.0,
@@ -99,19 +99,19 @@ pub struct HyperspaceState {
 impl Default for HyperspaceState {
     fn default() -> Self {
         Self {
-            threshold: 0.2, // main.py:768
-            w_limit: 7.2,   // main.py:755
-            bounce_gain: 0.9, // main.py:770
-            force_strength: 6.5,
-            force_lift: 0.35,
+            threshold: 0.2,
+            w_limit: 7.2,
+            bounce_gain: 0.9,
+            force_strength: 42.0,
+            force_lift: 0.18,
             restitution_normal: 0.04,
-            restitution_hyperspace: 0.92, // main.py:772
+            restitution_hyperspace: 0.92,
             gravity_hold: false,
-            shift_brake_drag: 8.4,
+            shift_brake_drag: 4.1,
             hyper_mouse_w_speed: 1.0,
-            hyper_turn_w_speed: 0.5,
+            hyper_turn_w_speed: 0.65,
             ball_friction_default: 0.02,
-            ball_friction_shift: 0.65,
+            ball_friction_shift: 0.05,
         }
     }
 }
@@ -160,7 +160,7 @@ impl Default for JumpState {
             jump_float_timer: 0.0,
             jump_float_duration: 0.56,
             jump_float_drag: 5.8,
-            float_fall_drag: 2.4,
+            float_fall_drag: 2.2,
             hit_cooldown: 0.0,
             attack_cooldown: 0.0,
             player_damage_cooldown: 0.0,

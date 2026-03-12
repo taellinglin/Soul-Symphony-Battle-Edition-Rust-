@@ -158,91 +158,131 @@ fn fragment(
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> @location(0) vec4<f32> {
-    var pbr_input = pbr_input_from_standard_material(in, is_front);
+    var _pbr_input = pbr_input_from_standard_material(in, is_front);
     let time = settings.time;
-    let v_world_pos = in.world_position.xyz;
+    let world_pos = in.world_position.xyz;
+    let world_xz = world_pos.xz;
 
-    // Standard structural density (clumpy look)
-    var local_w = compute_level_w_like(v_world_pos);
+    // Structural density field (thermal bands)
+    var local_w = compute_level_w_like(world_pos);
     var density = (local_w + 2.25) / 4.5;
-    
-    // Micro-noise synced with ceiling
-    let micro = fbm(v_world_pos.xz * 0.12 + vec2(5.4, -2.2));
+
+    // Micro-noise for clumpy structure
+    let micro = fbm(world_xz * 0.12 + vec2(5.4, -2.2));
     density = clamp(density + (micro - 0.5) * 0.4, 0.0, 1.0);
-    
-    // Parity: Apply density contrast and gamma before smoothing
+
     density = clamp(density * settings.density_contrast, 0.0, 1.0);
     density = pow(density, settings.density_gamma);
     density = smoothstep(0.0, 1.0, density);
 
-    var thermal_color = roygbiv_thermal(density);
+    var thermal_col = roygbiv_thermal(density);
 
-    // Procedural Ripples (Liquid surface movement)
-    let ripple_uv = v_world_pos.xz * 0.12;
-    var combined_ripples = 0.0;
-    combined_ripples += sin(ripple_uv.x * 3.5 + time * 1.8) * 0.45;
-    combined_ripples += sin(ripple_uv.y * 2.8 - time * 1.4) * 0.35;
-    combined_ripples += sin((ripple_uv.x + ripple_uv.y) * 4.2 + time * 2.2) * 0.25;
-    
-    // Final noise for color cycling sync
-    let uv = v_world_pos.xz * 0.08; 
+    // Optional rainbow-strength blend (arena uses 0.0, so effectively off)
+    let cycle_mix = clamp(settings.rainbow_strength, 0.0, 1.0);
+    if (cycle_mix > 0.001) {
+        let cycle_col = roygbiv_thermal(density);
+        thermal_col = mix(thermal_col, cycle_col, cycle_mix);
+    }
+
+    // Water lighting model (specular highlights + sparkles)
+    let uv = world_xz * max(0.02, settings.uv_scale * 0.08);
     let flow_a = vec2(time * 0.09, -time * 0.05);
     let flow_b = vec2(-time * 0.06, time * 0.07);
-    
-    let n0 = fbm(uv * 1.15 + flow_a + combined_ripples * 0.05);
-    let n1 = fbm(uv * 0.76 - flow_b - combined_ripples * 0.07);
-    let combined_noise = (n0 * 0.6 + n1 * 0.4);
 
-    // Base deep water color foundation
-    let base_water = vec3(0.06, 0.08, 0.15); // Deep Navy
-    
-    // Specular highlight boost for ripple visibility
-    let spec_highlight = pow(combined_noise, 6.0) * settings.spec_strength;
-    
-    // Slow HSV hue cycling - speed 0.2
-    let hue = fract(time * 0.2 + combined_noise * 0.4);
-    let sat = 0.82;
-    let val = 0.95;
-    let hi = floor(hue * 6.0) % 6.0;
-    let f_hue = hue * 6.0 - floor(hue * 6.0);
-    let p = val * (1.0 - sat);
-    let q = val * (1.0 - sat * f_hue);
-    let t_val = val * (1.0 - sat * (1.0 - f_hue));
-    var cycle_color: vec3<f32>;
-    if (hi < 1.0) {
-        cycle_color = vec3(val, t_val, p);
-    } else if (hi < 2.0) {
-        cycle_color = vec3(q, val, p);
-    } else if (hi < 3.0) {
-        cycle_color = vec3(p, val, t_val);
-    } else if (hi < 4.0) {
-        cycle_color = vec3(p, q, val);
-    } else if (hi < 5.0) {
-        cycle_color = vec3(t_val, p, val);
-    } else {
-        cycle_color = vec3(val, p, q);
+    let n0 = fbm(uv * 1.25 + flow_a);
+    let n1 = fbm(uv * 2.35 + flow_b + vec2(11.3, -4.7));
+    let h = n0 * 0.62 + n1 * 0.38;
+
+    let eps = 0.06;
+    let hx = fbm((uv + vec2(eps, 0.0)) * 1.25 + flow_a) * 0.62
+           + fbm((uv + vec2(eps, 0.0)) * 2.35 + flow_b + vec2(11.3, -4.7)) * 0.38;
+    let hy = fbm((uv + vec2(0.0, eps)) * 1.25 + flow_a) * 0.62
+           + fbm((uv + vec2(0.0, eps)) * 2.35 + flow_b + vec2(11.3, -4.7)) * 0.38;
+
+    let normal = normalize(vec3((hx - h) * 6.8, (hy - h) * 6.8, 1.0));
+    let light_dir = normalize(vec3(0.35, 0.28, 0.89));
+    let view_dir = vec3(0.0, 0.0, 1.0);
+    let half_vec = normalize(light_dir + view_dir);
+
+    let ndotl = max(dot(normal, light_dir), 0.0);
+    let ndotv = max(dot(normal, view_dir), 0.0);
+    let spec = pow(max(dot(normal, half_vec), 0.0), 84.0);
+
+    let sparkle_noise = fbm(uv * 9.4 + vec2(time * 0.34, -time * 0.27));
+    let sparkle = smoothstep(0.78, 0.95, sparkle_noise) * smoothstep(0.45, 1.0, spec);
+
+    let spec_strength = max(0.2, settings.spec_strength);
+    let base = vec3(0.05, 0.08, 0.11) + vec3(0.10, 0.14, 0.18) * ndotl;
+    let ndotv_fresnel = pow(1.0 - ndotv, 3.0);
+    let highlights = vec3(1.0) * (spec * (0.7 + spec_strength * 0.9) + sparkle * (0.22 + spec_strength * 0.55));
+
+    var water_col = clamp(base + highlights, vec3(0.0), vec3(1.0));
+    if (settings.spec_strength <= 0.01
+        && settings.room_tex_strength <= 0.01
+        && settings.diffusion_strength <= 0.01
+        && settings.rainbow_strength <= 0.01) {
+        water_col = vec3(0.0);
     }
 
-    // Blend thermal ROYGBIV pattern with the slow hue cycle
-    let thermal_cycle = mix(cycle_color, thermal_color.rgb, 0.5);
-    
-    // Use alpha as 'intensity' over the deep navy base
-    var final_rgb = mix(base_water, thermal_cycle, settings.alpha);
-    final_rgb += spec_highlight;
-    
-    // Reflection Logic
-    let fresnel = pow(1.0 - max(dot(normalize(view.world_position - v_world_pos), vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
+    // Optional underlying room texture (disabled in arena parity: strength = 0.0)
+    var room_desat = vec3(0.0);
+    if (settings.room_tex_strength > 0.01) {
+        let room_tex = textureSample(room_texture, room_sampler, in.uv).rgb;
+        let room_luma = dot(room_tex, vec3(0.299, 0.587, 0.114));
+        room_desat = mix(room_tex, vec3(room_luma), clamp(settings.room_tex_desat, 0.0, 1.0));
+    }
+
+    let thermal_mix = clamp(settings.thermal_mode, 0.0, 1.0) * clamp(settings.thermal_strength * 0.6, 0.0, 1.0);
+    let thermal_only =
+        (settings.thermal_mode > 0.5
+         && settings.thermal_strength > 0.01
+         && settings.room_tex_strength <= 0.01
+         && settings.spec_strength <= 0.01
+         && settings.diffusion_strength <= 0.01
+         && settings.rainbow_strength <= 0.01);
+
+    var final_rgb: vec3<f32>;
+    if (thermal_only) {
+        final_rgb = thermal_col;
+    } else {
+        final_rgb = mix(water_col, thermal_col, thermal_mix);
+    }
+
+    // Compression thermal overlay
+    let compression_intensity = clamp((1.0 - settings.compression_factor) / 0.65, 0.0, 1.0);
+    let compression_col = roygbiv_thermal(compression_intensity);
+    let compression_mix = clamp(settings.compression_thermal_strength, 0.0, 1.0);
+    final_rgb = mix(final_rgb, compression_col, compression_mix);
+
+    if (!thermal_only && settings.room_tex_strength > 0.01) {
+        final_rgb = clamp(final_rgb + room_desat * clamp(settings.room_tex_strength, 0.0, 1.0), vec3(0.0), vec3(1.0));
+    }
+    final_rgb = clamp(final_rgb, vec3(0.0), vec3(1.0));
+
+    // Mild spec-based hue shift (matches original GLSL behaviour)
+    if (settings.spec_strength > 0.01) {
+        final_rgb = hue_shift(final_rgb, time * 0.18);
+    }
+
+    // Reflection (uses offscreen inverted-echo texture when enabled)
     if (settings.reflection_strength > 0.001) {
+        let view_vec = normalize(view.world_position - world_pos);
+        let fres = pow(1.0 - max(dot(view_vec, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
         let screen_uv = (in.position.xy) / view.viewport.zw;
         let reflection_sample = textureSample(reflection_texture, reflection_sampler, screen_uv).rgb;
-        final_rgb = mix(final_rgb, reflection_sample, settings.reflection_strength * (0.3 + fresnel * 0.7));
+        final_rgb = mix(final_rgb, reflection_sample, settings.reflection_strength * (0.3 + fres * 0.7));
     }
 
-    // Restore horizon fog (Void parity)
-    let dist = distance(view.world_position, v_world_pos);
-    let fog_factor = clamp((settings.fog_end - dist) / (settings.fog_end - settings.fog_start), 0.0, 1.0);
-    // Fix gray line: use settings.fog_color instead of hardcoded black
+    // Fog with shared 0..35 range and supplied fog color
+    let dist = distance(view.world_position, world_pos);
+    let fog_range = max(0.001, settings.fog_end - settings.fog_start);
+    let fog_factor = clamp((settings.fog_end - dist) / fog_range, 0.0, 1.0);
     final_rgb = mix(settings.fog_color.rgb, final_rgb, fog_factor);
 
-    return vec4<f32>(final_rgb, 1.0);
+    var out_alpha = clamp(settings.alpha, 0.0, 1.0);
+    if (settings.thermal_mode > 0.5) {
+        out_alpha = clamp(out_alpha + 0.18, 0.0, 1.0);
+    }
+
+    return vec4<f32>(final_rgb, out_alpha);
 }

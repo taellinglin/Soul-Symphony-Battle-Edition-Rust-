@@ -20,7 +20,7 @@ pub(crate) fn update_minimap(
     let dt = time.delta_seconds();
     map_timer.cooldown -= dt;
     if map_timer.cooldown > 0.0 { return; }
-    map_timer.cooldown = 1.0 / 18.0; // Optimized for performance
+    map_timer.cooldown = 1.0 / 14.0;
 
     let Ok(player_data) = player_query.get_single() else { return };
     let (player_tf, _player_sp) = player_data;
@@ -34,7 +34,7 @@ pub(crate) fn update_minimap(
     root_style.height = Val::Px(220.0 * scale);
 
     let center = player_tf.translation;
-    let radius = 36.0;
+    let radius = 160.0;
     let inv_radius = 1.0 / radius;
     let map_scale = 110.0 * scale; // Half of 220
 

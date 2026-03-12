@@ -55,21 +55,13 @@ fn auto_screenshot(
     main_window: Query<Entity, With<Window>>,
     mut screenshot_manager: ResMut<bevy::render::view::screenshot::ScreenshotManager>,
     mut done: Local<bool>,
-    player_q: Query<(&Transform, &crate::components::Spatial4D), With<crate::player::Player>>,
-    camera_q: Query<&Transform, With<crate::player::PlayerCamera>>,
 ) {
     if *done { return; }
     *timer += time.delta_seconds();
-    if *timer > 4.0 {
-        // Debug: log player and camera positions at screenshot time
-        if let Ok((p_tf, p_sp)) = player_q.get_single() {
-            info!("DEBUG SCREENSHOT: Player pos={:?} w={}", p_tf.translation, p_sp.w);
-        }
-        if let Ok(c_tf) = camera_q.get_single() {
-            info!("DEBUG SCREENSHOT: Camera pos={:?}", c_tf.translation);
-        }
+    // Some Linux/NVIDIA setups close the window early; grab a reference frame quickly.
+    if *timer > 3.5 {
         if let Ok(window_entity) = main_window.get_single() {
-            let _ = screenshot_manager.save_screenshot_to_disk(window_entity, "/tmp/bevy_screen.png");
+            let _ = screenshot_manager.save_screenshot_to_disk(window_entity, "/tmp/original_screen.png");
             *done = true;
         }
     }
@@ -121,8 +113,8 @@ fn setup_camera_light(
             },
             projection: Projection::Perspective(PerspectiveProjection {
                 fov: 108.0_f32.to_radians(),
-                near: 0.15,
-                far: 2000.0,
+                near: 0.012,
+                far: 1500.0,
                 ..default()
             }),
             transform: Transform::from_xyz(0.0, 2.35, 6.8).looking_at(Vec3::new(0.0, 0.32, 0.0), Vec3::Y),
@@ -131,10 +123,10 @@ fn setup_camera_light(
         player::PlayerCamera,
         effects::CrtSettings::default(),
         effects::viscous::ViscousSettings::default(),
-        // Python parity: bluish-gray fog (0.1, 0.12, 0.17) from 0.8 to 18.0
+        // Python parity (main.py _setup_camera): black fog from 0.0 to 35.0
         FogSettings {
-            color: Color::srgb(0.1, 0.12, 0.17),
-            falloff: FogFalloff::Linear { start: 0.8, end: 18.0 },
+            color: Color::BLACK,
+            falloff: FogFalloff::Linear { start: 0.0, end: 35.0 },
             ..default()
         },
         BloomSettings {

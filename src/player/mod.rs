@@ -5,6 +5,7 @@ mod camera;
 
 // Re-export all public types
 pub use components::*;
+pub use physics::sample_water_height;
 
 use bevy::prelude::*;
 

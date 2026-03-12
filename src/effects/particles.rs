@@ -3,11 +3,17 @@ use bevy_hanabi::prelude::*;
 #[allow(unused_imports)]
 use crate::components::Spatial4D;
 
+/// Parity: original has `enable_gravity_particles = False`. Default off to match.
+#[derive(Resource, Default)]
+pub struct EnableGravityParticles(pub bool);
+
 pub struct FxParticlesPlugin;
 
 impl Plugin for FxParticlesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (setup_star_particles, setup_gravity_particles));
+        app.init_resource::<EnableGravityParticles>()
+            .add_systems(Startup, (setup_star_particles, setup_gravity_particles))
+            .add_systems(Update, spawn_gravity_particles_in_level);
     }
 }
 
@@ -102,6 +108,30 @@ fn setup_gravity_particles(
     commands.insert_resource(GravityEffect(effect_handle));
 }
 
+fn spawn_gravity_particles_in_level(
+    enable: Res<EnableGravityParticles>,
+    graph: Res<crate::map::DungeonGraph>,
+    gravity_effect: Option<Res<GravityEffect>>,
+    query: Query<Entity, With<GravityParticles>>,
+    mut commands: Commands,
+) {
+    if !enable.0 || graph.rooms.is_empty() || gravity_effect.is_none() || !query.is_empty() {
+        return;
+    }
+    let center = graph.rooms.first().map(|r| {
+        let c = r.center();
+        Vec3::new(c.x, 2.0, c.y)
+    }).unwrap_or(Vec3::new(0.0, 2.0, 0.0));
+    let handle = gravity_effect.unwrap().0.clone();
+    commands.spawn((
+        ParticleEffectBundle {
+            effect: ParticleEffect::new(handle),
+            transform: Transform::from_translation(center),
+            ..default()
+        },
+        GravityParticles,
+    ));
+}
 
 #[derive(Resource)]
 pub struct GravityEffect(pub Handle<EffectAsset>);
