@@ -50,9 +50,20 @@ pub(crate) fn generate_dungeon(
     
     let (mut rooms, edges) = match config.layout_mode.as_str() {
         "arena" => {
-            // Arena mode skips BSP rooms entirely and builds platforms directly.
-            // We return an empty graph to skip normal room rendering.
-            (Vec::new(), Vec::new())
+            let hub_center_x = map_w as f32 * 0.5;
+            let hub_center_z = map_w as f32 * 0.5;
+            let hub_room = Room {
+                x: hub_center_x - 2000.0,
+                y: hub_center_z - 2000.0,
+                w: 4000.0,
+                h: 4000.0,
+                w_layer: 0,
+                _id: 0,
+                dimension_field: DimensionField::default(),
+                pockets: Vec::new(),
+                doors: RoomDoors { top: vec![], bottom: vec![], left: vec![], right: vec![] },
+            };
+            (vec![hub_room], Vec::new())
         },
         "hexmix" => {
             let cell_size = (avg_scaled * 0.96) as i32;
@@ -181,6 +192,7 @@ pub(crate) fn generate_dungeon(
                 compression_factor: 1.0,
                 fog_start: 20.0,
                 fog_end: 150.0,
+                fog_color: bevy::color::LinearRgba::new(0.1, 0.12, 0.17, 1.0),
             },
         },
     });
@@ -197,6 +209,7 @@ pub(crate) fn generate_dungeon(
                 compression_factor: 1.0,
                 fog_start: 20.0,
                 fog_end: 150.0,
+                fog_color: bevy::color::LinearRgba::new(0.1, 0.12, 0.17, 1.0),
             },
         },
     });
@@ -213,6 +226,9 @@ pub(crate) fn generate_dungeon(
         let group_bit = 1 << (clamped_layer + 15);
         let layer_group = bevy_rapier3d::prelude::Group::from_bits_truncate(group_bit as u32);
         let collision_groups = bevy_rapier3d::prelude::CollisionGroups::new(layer_group, bevy_rapier3d::prelude::Group::all());
+
+        // Spawn the Room Entity itself for particles/logic
+        commands.spawn((r.clone(), SpatialBundle::default()));
 
         // Floor — simple dark surface (Python parity: floor color 0.19, 0.22, 0.28)
         // Water effect comes from separate map-wide water surface at Y=0.28
@@ -247,6 +263,7 @@ pub(crate) fn generate_dungeon(
                             compression_factor: 1.0,
                             fog_start: 20.0,
                             fog_end: 150.0,
+                            fog_color: bevy::color::LinearRgba::new(0.1, 0.12, 0.17, 1.0),
                         },
                     },
                 }),
@@ -339,6 +356,7 @@ pub(crate) fn generate_dungeon(
                             compression_factor: 1.0,
                             fog_start: 20.0,
                             fog_end: 150.0,
+                            fog_color: bevy::color::LinearRgba::new(0.1, 0.12, 0.17, 1.0),
                         },
                     },
                 });
@@ -524,27 +542,38 @@ pub(crate) fn generate_dungeon(
     ));
 
     // ==========================================
+    // PHYSICAL WORLD BOUNDARIES (Height Cap Parity)
+    // ==========================================
+    let (high_y, low_y) = if config.layout_mode == "arena" {
+        (15.3, -15.3)
+    } else {
+        (config.room_height + 4.0, -1.4)
+    };
+
+    // Top physical ceiling collider
+    commands.spawn((
+        RigidBody::Fixed,
+        Collider::cuboid(water_overscan, 0.11, water_overscan),
+        Transform::from_xyz(map_half, high_y + 0.11, map_half),
+        GlobalTransform::default(),
+        // Parity: isolate boundaries to bit 31 (Group 32)
+        CollisionGroups::new(Group::GROUP_32, Group::GROUP_32),
+        MapGeometry,
+    ));
+
+    // Bottom physical floor collider
+    commands.spawn((
+        RigidBody::Fixed,
+        Collider::cuboid(water_overscan, 0.11, water_overscan),
+        Transform::from_xyz(map_half, low_y - 0.11, map_half),
+        GlobalTransform::default(),
+        CollisionGroups::new(Group::GROUP_32, Group::GROUP_32),
+        MapGeometry,
+    ));
+
+    // ==========================================
     // ARENA MODE GENERATION
     // ==========================================
-    if config.layout_mode == "arena" {
-        graph.rooms.clear();
-
-
-        // Inject a fake "hub" room into the graph so the player spawn system works
-        let hub_center_x = map_w as f32 * 0.5;
-        let hub_center_z = map_w as f32 * 0.5;
-        let hub_room = Room {
-            x: hub_center_x - 250.0,
-            y: hub_center_z - 250.0,
-            w: 500.0,
-            h: 500.0,
-            w_layer: 0,
-            _id: 0,
-            dimension_field: DimensionField::default(),
-            doors: RoomDoors { top: vec![], bottom: vec![], left: vec![], right: vec![] },
-        };
-        graph.rooms.push(hub_room);
-    }
 }
 
 

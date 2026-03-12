@@ -28,8 +28,10 @@ impl Plugin for PlayerPlugin {
            .add_systems(Update, (
                 physics::player_physics_controller,
                 physics::apply_hyperspace_physics,
+                physics::apply_world_wrap.after(physics::apply_hyperspace_physics),
                 physics::apply_jump_float_drag,
                 physics::apply_compression_physics,
+                physics::apply_water_buoyancy,
                 physics::apply_speed_clamping,
                 physics::anti_tunneling_system,
                 physics::ball_contact_analysis,

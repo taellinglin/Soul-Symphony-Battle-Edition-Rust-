@@ -4,6 +4,7 @@ mod combat;
 pub use components::*;
 
 use bevy::prelude::*;
+use bevy::render::view::{NoFrustumCulling, RenderLayers};
 use crate::components::Spatial4D;
 
 pub struct WeaponSystemPlugin;
@@ -32,25 +33,40 @@ fn spawn_blade_echoes(
 ) {
     for (mut weapon, tf) in query.iter_mut() {
         if weapon.state != WeaponState::Idle && weapon.echo_timer <= 0.0 {
-            weapon.echo_timer = 1.0 / 120.0;
+            weapon.echo_timer = 1.0 / 115.0; // Echo frequency
             
-            // Random color for parity
-            let color = Color::srgba(0.29, 0.0, 0.51, 0.5); // Purple-ish placeholder
-            
-            commands.spawn((
-                PbrBundle {
-                    mesh: meshes.add(Cuboid::new(0.095 * SWORD_SCALE, 0.74 * SWORD_SCALE, 0.072 * SWORD_SCALE)),
-                    material: materials.add(StandardMaterial {
-                        base_color: color,
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
+            // Purple-ish echo material
+            let color = Color::srgba(0.28, 0.04, 0.52, 0.5);
+            let echo_mat = materials.add(StandardMaterial {
+                base_color: color,
+                unlit: true,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            });
+
+            // Triple-box parts (Blade, Guard, Handle)
+            let parts = [
+                (Cuboid::new(0.12 * SWORD_GEO_SCALE, 0.035 * SWORD_GEO_SCALE, 1.48 * SWORD_GEO_SCALE), Transform::from_xyz(0.0, 0.0, -0.74 * SWORD_GEO_SCALE)),
+                (Cuboid::new(0.48 * SWORD_GEO_SCALE, 0.12 * SWORD_GEO_SCALE, 0.06 * SWORD_GEO_SCALE), Transform::from_xyz(0.0, 0.0, 0.0)),
+                (Cuboid::new(0.08 * SWORD_GEO_SCALE, 0.08 * SWORD_GEO_SCALE, 0.44 * SWORD_GEO_SCALE), Transform::from_xyz(0.0, 0.0, 0.22 * SWORD_GEO_SCALE)),
+            ];
+
+            for (mesh_shape, local_tf) in parts {
+                let world_tf = Transform::from_translation(tf.transform_point(local_tf.translation))
+                    .with_rotation(tf.rotation * local_tf.rotation);
+                
+                commands.spawn((
+                    PbrBundle {
+                        mesh: meshes.add(mesh_shape),
+                        material: echo_mat.clone(),
+                        transform: world_tf,
                         ..default()
-                    }),
-                    transform: *tf, // Attach to weapon transform
-                    ..default()
-                },
-                BladeEcho { life: 0.4, max_life: 0.4 },
-            ));
+                    },
+                    BladeEcho { life: 0.38, max_life: 0.38 },
+                    NoFrustumCulling,
+                    RenderLayers::layer(2),
+                ));
+            }
         }
     }
 }

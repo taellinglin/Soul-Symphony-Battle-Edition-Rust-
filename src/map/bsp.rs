@@ -1,6 +1,7 @@
 use rand::{Rng, seq::SliceRandom, thread_rng};
 use std::collections::{HashSet, HashMap};
 
+use bevy::prelude::Vec2;
 use super::types::*;
 
 pub(crate) struct BspState {
@@ -31,7 +32,38 @@ impl BspState {
         sx = sx.clamp(0.0, (self.width as f32 - sw).max(0.0));
         sy = sy.clamp(0.0, (self.depth as f32 - sh).max(0.0));
         
-        Room { x: sx, y: sy, w: sw, h: sh, w_layer: 0, _id: 0, dimension_field: DimensionField::default(), doors: RoomDoors::default() }
+        let mut pockets = Vec::new();
+        let area = sw * sh;
+        let pocket_count = (area / 120.0).max(1.0) as i32; // ~1 pocket per 120 units squared
+        let mut rng = rand::thread_rng();
+
+        for _ in 0..pocket_count {
+            if rng.gen_bool(0.65) {
+                let px = sx + rng.gen_range(2.0..(sw - 2.0).max(2.1));
+                let py = sy + rng.gen_range(2.0..(sh - 2.0).max(2.1));
+                let radius = rng.gen_range(4.0..12.0);
+                
+                // Usually compress (< 1.0), sometimes dilate (> 1.0)
+                let factor = if rng.gen_bool(0.8) {
+                    rng.gen_range(0.45..0.9)
+                } else {
+                    rng.gen_range(1.1..1.8)
+                };
+
+                pockets.push(CompressionPocket {
+                    position: Vec2::new(px, py),
+                    radius,
+                    factor,
+                });
+            }
+        }
+
+        Room { 
+            x: sx, y: sy, w: sw, h: sh, w_layer: 0, _id: 0, 
+            dimension_field: DimensionField::default(), 
+            pockets,
+            doors: RoomDoors::default() 
+        }
     }
 
     pub fn fit_room_to_cell(&self, gx: i32, gy: i32, size: f32, room_w: f32, room_h: f32, pad: f32) -> Room {

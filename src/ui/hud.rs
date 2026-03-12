@@ -102,8 +102,8 @@ pub(crate) fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             // Mouse Icon
             parent.spawn(NodeBundle {
                 style: Style {
-                    width: Val::Px(120.0), // Wider mouse icon to match original
-                    height: Val::Px(120.0), // Squarer
+                    width: Val::Px(120.0), // Tuned down more from 150
+                    height: Val::Px(120.0), 
                     flex_direction: FlexDirection::Column,
                     ..default()
                 },
@@ -143,8 +143,8 @@ pub(crate) fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
         root.spawn(NodeBundle {
             style: Style {
                 flex_direction: FlexDirection::Column,
-                width: Val::Px(300.0),
-                margin: UiRect::all(Val::Px(20.0)),
+                width: Val::Px(350.0), // Tuned down more from 380
+                margin: UiRect::all(Val::Px(24.0)),
                 ..default()
             },
             ..default()
@@ -154,20 +154,20 @@ pub(crate) fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 TextBundle::from_section(
                     "HP",
                     TextStyle {
-                        font: Handle::default(), font_size: 20.0,
+                        font: Handle::default(), font_size: 20.0, // Tuned down more from 24
                         color: Color::WHITE,
                         ..default()
                     },
-                ).with_style(Style { margin: UiRect::top(Val::Px(5.0)), ..default() }),
+                ).with_style(Style { margin: UiRect::top(Val::Px(4.0)), ..default() }),
                 HpLabelText,
             ));
 
             // HP Bar Container
             top_left.spawn(NodeBundle {
                 style: Style {
-                    width: Val::Px(280.0),
-                    height: Val::Px(24.0),
-                    margin: UiRect::bottom(Val::Px(5.0)),
+                    width: Val::Px(320.0), // Tuned down more from 350
+                    height: Val::Px(24.0), // Tuned down from 28
+                    margin: UiRect::bottom(Val::Px(4.0)),
                     ..default()
                 },
                 background_color: BackgroundColor(Color::srgba(0.05, 0.07, 0.1, 0.86)),
@@ -210,7 +210,7 @@ pub(crate) fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 TextBundle::from_section(
                     "LV 1 Exp",
                     TextStyle {
-                        font: Handle::default(), font_size: 18.0,
+                        font: Handle::default(), font_size: 16.0, // Tuned down more from 20
                         color: Color::srgba(0.86, 0.96, 1.0, 0.95),
                         ..default()
                     },
@@ -221,8 +221,8 @@ pub(crate) fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             // XP Bar Container
             top_left.spawn(NodeBundle {
                 style: Style {
-                    width: Val::Px(280.0),
-                    height: Val::Px(12.0),
+                    width: Val::Px(320.0), // Tuned down more from 350
+                    height: Val::Px(12.0), // Tuned down more from 14
                     ..default()
                 },
                 background_color: BackgroundColor(Color::srgba(0.04, 0.06, 0.09, 0.82)),
@@ -273,7 +273,7 @@ pub(crate) fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 TextBundle::from_section(
                     "Slayed: 0\nLeft: 0",
                     TextStyle {
-                        font: asset_server.load("fonts/Mine.ttf"), font_size: 24.0,
+                        font: asset_server.load("fonts/Mine.ttf"), font_size: 24.0, // Tuned down more from 30
                         color: Color::srgba(0.95, 0.98, 1.0, 0.95),
                         ..default()
                     },
@@ -291,8 +291,8 @@ pub(crate) fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(40.0),
                 right: Val::Px(40.0),
-                width: Val::Px(250.0),
-                height: Val::Px(250.0),
+                width: Val::Px(220.0), // Tuned down more from 300
+                height: Val::Px(220.0),
                 ..default()
             },
             ..default()
@@ -304,7 +304,7 @@ pub(crate) fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             TextBundle::from_section(
                 "HOLO MAP",
                 TextStyle {
-                    font: asset_server.load("fonts/Mine.ttf"), font_size: 16.0,
+                    font: asset_server.load("fonts/Mine.ttf"), font_size: 18.0, // Tuned down more from 20
                     color: Color::srgba(0.58, 0.98, 1.0, 0.94),
                     ..default()
                 },
@@ -516,8 +516,8 @@ pub(crate) fn spawn_hud_button(
     parent.spawn((
         NodeBundle {
             style: Style {
-                width: Val::Px(42.0),
-                height: Val::Px(42.0),
+                width: Val::Px(48.0), // Tuned down more from 52
+                height: Val::Px(48.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 margin: UiRect::all(Val::Px(2.0)),
@@ -534,7 +534,7 @@ pub(crate) fn spawn_hud_button(
             label_text,
             TextStyle {
                 font: asset_server.load("fonts/Mine.ttf"),
-                font_size: 20.0,
+                font_size: 20.0, // Tuned down more from 26
                 color: Color::srgba(0.9, 0.94, 1.0, 0.92),
             },
         ));
@@ -568,7 +568,7 @@ fn spawn_mouse_button(
             label_text,
             TextStyle {
                 font: asset_server.load("fonts/Mine.ttf"),
-                font_size: 16.0,
+                font_size: 16.0, // Tuned down more from 20
                 color: Color::WHITE, // Whiter text
             },
         ));

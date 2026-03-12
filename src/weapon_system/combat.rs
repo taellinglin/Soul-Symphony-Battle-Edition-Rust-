@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::render::view::{NoFrustumCulling, RenderLayers};
 use bevy_rapier3d::prelude::*;
 use crate::components::{Spatial4D, Health};
 
@@ -39,7 +40,7 @@ pub(crate) fn update_weapon_state(
             desired_forward -= input_up * desired_forward.dot(input_up);
             if desired_forward.length_squared() < 1e-6 {
                 let yaw = orbit.heading.to_radians();
-                desired_forward = Vec3::new(-yaw.sin(), 0.0, yaw.cos());
+                desired_forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos());
             } else {
                 desired_forward = desired_forward.normalize();
             }
@@ -68,10 +69,14 @@ pub(crate) fn update_weapon_state(
             weapon.anchor_pos = new_anchor;
             // clamp z above floor? Skip for now
 
-            let mut heading = (-new_fwd.x).atan2(new_fwd.z).to_degrees();
-            let mut yaw_offset = -16.0;
-            let mut pitch = -18.0;
-            let mut roll = 0.0;
+            let mut heading = (-new_fwd.x).atan2(-new_fwd.z).to_degrees();
+            // Python parity: Panda3D setHpr(heading+yaw_offset, pitch, roll)
+            // Panda3D pitch: positive = nose DOWN.  Bevy YXZ pitch: positive = nose UP.
+            // Panda3D roll:  positive = CW.          Bevy YXZ roll:  positive = CCW.
+            // Therefore we negate pitch and roll when applying to Bevy's euler.
+            let mut yaw_offset: f32 = -16.0;
+            let mut pitch: f32 = -18.0;  // Panda3D convention (will be negated at apply)
+            let mut roll: f32 = 0.0;     // Panda3D convention (will be negated at apply)
             let mut pivot_pos = weapon.anchor_pos;
             let mut emit_echo = false;
 
@@ -84,15 +89,17 @@ pub(crate) fn update_weapon_state(
                     let total = 0.35;
                     let t = (weapon.timer / total).min(1.0);
                     yaw_offset = -96.0 + 192.0 * t;
-                    pitch = -20.0 + 8.0 * (t * std::f32::consts::PI).sin().to_degrees();
-                    roll = 25.0 * (t * std::f32::consts::PI).sin().to_degrees();
+                    // Python: pitch = -20.0 + 8.0 * math.sin(t * math.pi)
+                    // math.sin returns [-1,1], used directly as degree offset
+                    pitch = -20.0 + 8.0 * (t * std::f32::consts::PI).sin();
+                    roll = 25.0 * (t * std::f32::consts::PI).sin();
                     emit_echo = true;
 
                     // Slash trails
                     if t >= 0.22 && t <= 0.82 {
                         weapon.slash_timer -= dt;
                         if weapon.slash_timer <= 0.0 {
-                            let curr_tip = tf.translation + tf.forward() * 1.48 * SWORD_SCALE;
+                            let curr_tip = tf.translation + tf.forward() * 1.48 * SWORD_GEO_SCALE;
                             if let Some(prev) = weapon.prev_tip_pos {
                                 let seg = curr_tip - prev;
                                 let seg_len = seg.length();
@@ -102,8 +109,8 @@ pub(crate) fn update_weapon_state(
                                     let trail_yaw = (-seg.x).atan2(seg.z).to_degrees();
 
                                     commands.spawn((
-                                        PbrBundle {
-                                            mesh: meshes.add(Cuboid::new(seg_len * 0.5, 0.04 * SWORD_SCALE, 0.012 * SWORD_SCALE)),
+                                        MaterialMeshBundle {
+                                            mesh: meshes.add(Cuboid::new(0.04, 0.001, 1.8)),
                                             material: materials.add(StandardMaterial {
                                                 base_color: Color::srgba(0.24, 0.95, 1.0, 0.68),
                                                 unlit: true,
@@ -115,6 +122,8 @@ pub(crate) fn update_weapon_state(
                                             ..default()
                                         },
                                         SlashTrail { life: 0.14, max_life: 0.14 },
+                                        NoFrustumCulling,
+                                        RenderLayers::layer(2),
                                     ));
                                 }
                             }
@@ -136,7 +145,8 @@ pub(crate) fn update_weapon_state(
                     let t = (weapon.timer / total).min(1.0);
                     yaw_offset = -180.0 + 540.0 * t;
                     pitch = -14.0;
-                    roll = 18.0 * (t * std::f32::consts::TAU).sin().to_degrees();
+                    // Python: roll = 18.0 * math.sin(t * math.tau)
+                    roll = 18.0 * (t * std::f32::consts::TAU).sin();
                     emit_echo = true;
 
                     if t >= 1.0 {
@@ -175,10 +185,11 @@ pub(crate) fn update_weapon_state(
                     let throw_pos = origin + dir * (distance * forward_amount) + right_throw * arc;
                     pivot_pos = throw_pos + input_up * (0.08 + 0.12 * (t * std::f32::consts::PI).sin());
 
-                    let fw_heading = (-dir.x).atan2(dir.z).to_degrees();
+                    let fw_heading = (-dir.x).atan2(-dir.z).to_degrees();
                     heading = if vel_sign >= 0.0 { fw_heading } else { fw_heading + 180.0 };
                     yaw_offset = 0.0;
-                    pitch = -8.0 + 5.0 * (t * std::f32::consts::PI).sin().to_degrees();
+                    // Python: pitch = -8.0 + 5.0 * math.sin(t * math.pi)
+                    pitch = -8.0 + 5.0 * (t * std::f32::consts::PI).sin();
                     roll = (weapon.timer * 1080.0) % 360.0;
                     emit_echo = true;
 
@@ -212,6 +223,7 @@ pub(crate) fn update_weapon_state(
                             radius: 0.1,
                             max_radius: ball_r * 8.2, // hyperbomb_max_scale_factor
                         },
+                        RenderLayers::layer(2),
                     ));
                     weapon.state = WeaponState::Idle;
                     weapon.timer = 0.0;
@@ -246,6 +258,7 @@ pub(crate) fn update_weapon_state(
                                 life: 4.2,
                             },
                             Spatial4D { w: player_sp.w, target_w: player_sp.w, layer: player_sp.layer, is_folded: false },
+                            RenderLayers::layer(2),
                         ));
                     }
                     weapon.state = WeaponState::Idle;
@@ -254,7 +267,8 @@ pub(crate) fn update_weapon_state(
             }
 
             tf.translation = pivot_pos;
-            tf.rotation = Quat::from_euler(EulerRot::YXZ, (heading + yaw_offset).to_radians(), pitch.to_radians(), roll.to_radians());
+            // Negate pitch and roll to convert from Panda3D convention to Bevy convention
+            tf.rotation = Quat::from_euler(EulerRot::YXZ, (heading + yaw_offset).to_radians(), (-pitch).to_radians(), (-roll).to_radians());
 
             // Emit echo
             if emit_echo {

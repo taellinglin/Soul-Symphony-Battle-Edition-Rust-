@@ -6,6 +6,8 @@ struct HyperSliceSettings {
     player_w: f32,
     object_w: f32,
     thickness: f32,
+    hyper_slice: f32,
+    hyper_falloff: f32,
     room_uv_scale: f32,
     time: f32,
     persistence: f32,
@@ -31,15 +33,18 @@ fn fragment(
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> @location(0) vec4<f32> {
-    // 4D Slice Calculation
+    // 4D Slice Calculation (1:1 Parity with Panda3D w_allow logic)
     let dist_w = abs(settings.player_w - settings.object_w);
-    let edge_width = settings.thickness * 0.22;
-    let slice_mask = 1.0 - smoothstep(settings.thickness - edge_width, settings.thickness, dist_w);
+    let slice_limit = settings.hyper_slice + settings.hyper_falloff;
     
-    // Discard fragments far from player's W coordinate (unless persistent)
-    if settings.persistence < 0.5 && dist_w > settings.thickness {
+    // Discard fragments outside the hyper-slice (The "5th Wall")
+    if settings.persistence < 0.5 && dist_w > slice_limit {
         discard;
     }
+    
+    let slice_mask = 1.0 - smoothstep(settings.hyper_slice, slice_limit, dist_w);
+    // Note: slice_mask can be used for alpha if alpha_mode is Blend, 
+    // but here we primarily use discard and edge glow for parity.
 
     // Default PBR shading
     var pbr_input = pbr_input_from_standard_material(in, is_front);
@@ -66,7 +71,8 @@ fn fragment(
     pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * tex_color, pbr_input.material.base_color.a);
     
     // 4D Edge Glow (Intense visual parity)
-    var edge_factor = pow(dist_w / settings.thickness, 4.0);
+    // Edge starts glowing when entering the hyper_falloff zone
+    var edge_factor = smoothstep(settings.hyper_slice, slice_limit, dist_w);
     if settings.persistence > 0.5 {
         edge_factor = 0.0;
     }

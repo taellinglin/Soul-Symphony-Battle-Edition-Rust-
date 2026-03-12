@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
 use crate::player::Player;
+use crate::components::CompressionState;
 
 pub struct InternalAudioPlugin;
 
@@ -9,7 +10,7 @@ impl Plugin for InternalAudioPlugin {
         app.add_event::<PlaySfxEvent>()
            .init_resource::<ActiveBgm>()
            .add_systems(Startup, load_audio_assets)
-           .add_systems(Update, (handle_sfx_events, manage_player_roll_sound, manage_bgm));
+           .add_systems(Update, (handle_sfx_events, manage_player_roll_sound, manage_timespace_tone, manage_bgm));
     }
 }
 
@@ -49,6 +50,7 @@ pub struct GameAudioAssets {
     pub roll: Handle<AudioSource>,
     pub bgm_exploration: Handle<AudioSource>,
     pub bgm_boss: Handle<AudioSource>,
+    pub timespace_tone: Handle<AudioSource>,
 }
 
 fn load_audio_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -67,6 +69,7 @@ fn load_audio_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
         roll: asset_server.load("soundfx/water.wav"), 
         bgm_exploration: asset_server.load("bgm/Soundtrack.mp3"),
         bgm_boss: asset_server.load("bgm/Boss.mp3"),
+        timespace_tone: asset_server.load("soundfx/timespace_sine_v2.wav"),
     };
     commands.insert_resource(assets);
 }
@@ -146,6 +149,53 @@ fn manage_player_roll_sound(
             // Smooth volume
             sink.set_volume(current_vol + (target_volume - current_vol) * 0.1);
             sink.set_speed(target_pitch);
+        }
+    }
+}
+
+// Marker for timespace compression tone
+#[derive(Component)]
+pub struct TimespaceToneSound;
+
+fn manage_timespace_tone(
+    mut commands: Commands,
+    player_query: Query<(&Transform, &CompressionState), With<Player>>,
+    mut sound_query: Query<(&mut Transform, &mut AudioSink), (With<TimespaceToneSound>, Without<Player>)>,
+    assets: Option<Res<GameAudioAssets>>,
+) {
+    let Ok((player_tf, comp_state)) = player_query.get_single() else { return };
+    let Some(assets) = assets else { return };
+
+    let factor = comp_state.factor_smoothed;
+    
+    // Deviation from 1.0 (normal space) increases volume
+    let deviation = (factor - 1.0).abs();
+    let target_volume = (deviation * 1.5).clamp(0.0, 0.45);
+    
+    // Pitch maps to density: compression (<1.0) = lower pitch, dilation (>1.0) = higher pitch
+    let target_pitch = factor.clamp(0.2, 3.0);
+
+    if sound_query.is_empty() {
+        commands.spawn((
+            TimespaceToneSound,
+            AudioSourceBundle {
+                source: assets.timespace_tone.clone(),
+                settings: PlaybackSettings {
+                    mode: bevy::audio::PlaybackMode::Loop,
+                    volume: bevy::audio::Volume::new(0.0), // Starts muted
+                    ..default()
+                },
+            },
+            TransformBundle::from_transform(*player_tf),
+        ));
+    } else {
+        for (mut tf, sink) in sound_query.iter_mut() {
+            tf.translation = player_tf.translation;
+            let current_vol = sink.volume();
+            // Smooth volume and pitch
+            sink.set_volume(current_vol + (target_volume - current_vol) * 0.05);
+            let current_pitch = sink.speed();
+            sink.set_speed(current_pitch + (target_pitch - current_pitch) * 0.1);
         }
     }
 }

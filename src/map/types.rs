@@ -56,7 +56,7 @@ impl Default for GenerationConfig {
             maze_vertical_link_chance: 0.13,
             average_room_size: 120.0, // MASSIVE open space feel
             room_size_jitter: 0.85,
-            room_height: 20.0, 
+            room_height: 4096.0, 
             wall_thickness: 0.2, 
             floor_thickness: 0.2,
             corridor_width: 32.5, 
@@ -76,6 +76,7 @@ pub struct DungeonGraph {
     pub rooms: Vec<Room>,
     pub corridors: Vec<Corridor>,
     pub edges: Vec<(usize, usize)>,
+    pub warp_links: Vec<crate::components::WarpLink>,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -101,6 +102,13 @@ impl Default for DimensionField {
     }
 }
 
+#[derive(Clone, Debug, Copy)]
+pub struct CompressionPocket {
+    pub position: Vec2,
+    pub radius: f32,
+    pub factor: f32, // < 1.0 (compression) or > 1.0 (dilation)
+}
+
 #[derive(Default, Clone, Debug)]
 pub struct RoomDoors {
     pub top: Vec<f32>,
@@ -109,7 +117,7 @@ pub struct RoomDoors {
     pub right: Vec<f32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Component)]
 pub struct Room {
     pub x: f32,
     pub y: f32,
@@ -118,6 +126,7 @@ pub struct Room {
     pub w_layer: i32,
     pub _id: usize,
     pub dimension_field: DimensionField,
+    pub pockets: Vec<CompressionPocket>,
     pub doors: RoomDoors,
 }
 

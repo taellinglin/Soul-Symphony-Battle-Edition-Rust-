@@ -1,6 +1,7 @@
 #import bevy_pbr::pbr_fragment::pbr_input_from_standard_material
 #import bevy_pbr::pbr_functions::apply_pbr_lighting
 #import bevy_pbr::forward_io::VertexOutput
+#import bevy_pbr::mesh_view_bindings::view
 
 fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
     let K = vec4<f32>(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
@@ -29,6 +30,8 @@ struct BallSettings {
     player_w: f32,
     object_w: f32,
     thickness: f32,
+    hyper_slice: f32,
+    hyper_falloff: f32,
     pad: f32,
     edge_color: vec4<f32>,
     layer0_scroll: vec2<f32>,
@@ -51,13 +54,15 @@ fn fragment(
     let t = settings.time;
     let uv = in.uv;
 
-    // 4D Slice check - for player ball, we mostly want to see it always
-    // but we can still dim it if far away. Removed discard for parity and visibility.
+    // 4D Slice Calculation (1:1 Parity)
     let diff = abs(settings.object_w - settings.player_w);
-    let slice_alpha = 1.0 - smoothstep(0.0, settings.thickness * 2.0, diff);
+    let slice_limit = settings.hyper_slice + settings.hyper_falloff;
     
-    let edge_factor = 1.0 - smoothstep(0.0, settings.thickness, diff);
-    let edge_glow = pow(1.0 - edge_factor, 3.0) * settings.edge_color.rgb * 8.0;
+    // Player ball dims out but doesn't discard (for visibility in mirror world)
+    let slice_alpha = 1.0 - smoothstep(settings.hyper_slice, slice_limit, diff);
+    
+    let edge_factor = smoothstep(settings.hyper_slice, slice_limit, diff);
+    let edge_glow = pow(edge_factor, 2.0) * settings.edge_color.rgb * 6.0;
 
     // Layer 0: scrolling noise pattern
     let uv0 = uv * 3.0 + settings.layer0_scroll * t;
@@ -87,12 +92,15 @@ fn fragment(
     let color = hsv2rgb(vec3<f32>(hue, sat, val));
 
     // Mix into PBR base color — keep some of the original material color for lighting
-    let base = pbr_input.material.base_color.rgb;
-    pbr_input.material.base_color = vec4<f32>(mix(base, color, 0.85) * slice_alpha, 1.0);
+    // -----------------------------------------------------------
+    // Final Compositing
+    // -----------------------------------------------------------
+    let base_layers = max(n0 * pulse0, max(n1 * pulse1, n2 * pulse2)); // Use nX * pulseX for individual layer contributions
+    var final_col = mix(settings.edge_color.rgb, color, 0.85); // Start with original color mix
+    final_col += edge_glow; // Add 4D edge glow
 
-    // Boost emissive for glow + 4D edge glow
-    let emissive_strength = 0.3 + 0.2 * sin(t * 2.0);
-    pbr_input.material.emissive = vec4<f32>((color * emissive_strength + edge_glow) * slice_alpha, 1.0);
+    pbr_input.material.base_color = vec4<f32>(final_col * slice_alpha, slice_alpha);
+    pbr_input.material.emissive   = vec4<f32>(final_col * 2.5 * slice_alpha, 1.0); // Boost for bloom
 
     return apply_pbr_lighting(pbr_input);
 }

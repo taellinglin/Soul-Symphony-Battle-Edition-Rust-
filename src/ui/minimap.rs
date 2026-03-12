@@ -30,13 +30,13 @@ pub(crate) fn update_minimap(
     let t = time.elapsed_seconds();
     let panel_pulse = 0.5 + 0.5 * (t * 2.7).sin();
     let scale = 1.0 + panel_pulse * 0.01;
-    root_style.width = Val::Px(200.0 * scale);
-    root_style.height = Val::Px(200.0 * scale);
+    root_style.width = Val::Px(220.0 * scale); // Sync with hud.rs (220.0)
+    root_style.height = Val::Px(220.0 * scale);
 
     let center = player_tf.translation;
     let radius = 36.0;
     let inv_radius = 1.0 / radius;
-    let map_scale = 100.0 * scale; 
+    let map_scale = 110.0 * scale; // Half of 220
 
     struct DotInfo {
         pos: Vec2,

@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 pub mod particles;
 pub mod audio;
+pub mod viscous;
+pub mod trails;
 
 use bevy::{
     prelude::*,
@@ -26,6 +28,8 @@ impl Plugin for FxPlugin {
             UniformComponentPlugin::<CrtSettings>::default(),
             particles::FxParticlesPlugin,
             audio::InternalAudioPlugin,
+            viscous::ViscousDistortPlugin,
+            trails::TrailPlugin,
         ));
 
         app.add_event::<FloatingTextEvent>();

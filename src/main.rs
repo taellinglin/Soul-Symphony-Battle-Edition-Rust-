@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::pbr::FogSettings;
+use bevy::core_pipeline::bloom::BloomSettings;
 use bevy_hanabi::prelude::*;
 use bevy_rapier3d::prelude::*;
 use bevy::window::CursorGrabMode;
@@ -20,8 +21,14 @@ fn main() {
         .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()).set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Soul Symphony (Battle Edition)".into(),
-                resolution: bevy::window::WindowResolution::new(1920.0, 1080.0)
-                    .with_scale_factor_override(1.0),
+                resolution: bevy::window::WindowResolution::new(1920.0, 1080.0),
+                present_mode: bevy::window::PresentMode::AutoVsync,
+                ..default()
+            }),
+            ..default()
+        }).set(bevy::render::RenderPlugin {
+            render_creation: bevy::render::settings::RenderCreation::Automatic(bevy::render::settings::WgpuSettings {
+                backends: Some(bevy::render::settings::Backends::VULKAN),
                 ..default()
             }),
             ..default()
@@ -84,33 +91,38 @@ fn setup_camera_light(
     mut images: ResMut<Assets<Image>>,
 ) {
     commands.insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 250.0,
+        color: Color::srgb(0.62, 0.67, 0.74),
+        brightness: 120.0, // Adjusted for Bevy's PBR intensity vs Panda3D
     });
 
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 8000.0,
-            shadows_enabled: false,
+    commands.spawn((
+        DirectionalLightBundle {
+            directional_light: DirectionalLight {
+                color: Color::srgb(0.9, 0.97, 1.0),
+                illuminance: 9200.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            // Panda3D HPR (18, -62, 0) -> Bevy: pitch=-62, yaw=18
+            transform: Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, 18.0_f32.to_radians(), -62.0_f32.to_radians(), 0.0)),
             ..default()
         },
-        transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_4)),
-        ..default()
-    });
+        bevy::render::view::RenderLayers::from_layers(&[0, 2]),
+    ));
 
-    // Main Camera (Draws on Top)
+    // Main Camera (Layer 0 - World + Distortion)
     commands.spawn((
         Camera3dBundle {
             camera: Camera {
                 hdr: true,
                 order: 0,
-                clear_color: bevy::render::camera::ClearColorConfig::Custom(Color::BLACK),
+                clear_color: bevy::render::camera::ClearColorConfig::Custom(Color::srgb(0.03, 0.04, 0.06)),
                 ..default()
             },
             projection: Projection::Perspective(PerspectiveProjection {
-                fov: 75.0_f32.to_radians(),
-                near: 0.012,
-                far: 1500.0,
+                fov: 108.0_f32.to_radians(),
+                near: 0.15,
+                far: 2000.0,
                 ..default()
             }),
             transform: Transform::from_xyz(0.0, 2.35, 6.8).looking_at(Vec3::new(0.0, 0.32, 0.0), Vec3::Y),
@@ -118,26 +130,71 @@ fn setup_camera_light(
         },
         player::PlayerCamera,
         effects::CrtSettings::default(),
-        // Python parity: fog from camera.py L14-17: color(0.1, 0.12, 0.17)
-        // Bevy fog range tuned to match Panda3D visual (not 1:1 values due to engine differences)
+        effects::viscous::ViscousSettings::default(),
+        // Python parity: bluish-gray fog (0.1, 0.12, 0.17) from 0.8 to 18.0
         FogSettings {
-            color: Color::BLACK,
-            falloff: FogFalloff::Linear { start: 20.0, end: 120.0 }, // Void parity
+            color: Color::srgb(0.1, 0.12, 0.17),
+            falloff: FogFalloff::Linear { start: 0.8, end: 18.0 },
             ..default()
         },
+        BloomSettings {
+            intensity: 0.35,
+            prefilter_settings: bevy::core_pipeline::bloom::BloomPrefilterSettings {
+                threshold: 0.52, // Matched to u_bloom_threshold
+                threshold_softness: 0.2,
+            },
+            ..default()
+        },
+        bevy::render::view::RenderLayers::layer(0),
     ));
 
-    // Floating Text Camera (Syncs with Main Camera, draws floating text on layer 1)
+    // Foreground Camera (Layer 2 - Player/Weapon, NO DISTORTION)
     commands.spawn((
         Camera3dBundle {
             camera: Camera {
-                order: 1,
+                hdr: true,
+                order: 2, // Drawn after main scene (0) and world-distort
                 clear_color: bevy::render::camera::ClearColorConfig::None,
                 ..default()
             },
             projection: Projection::Perspective(PerspectiveProjection {
                 fov: 75.0_f32.to_radians(),
-                near: 0.012,
+                near: 0.05, // Closer near plane for weapon transparency
+                far: 2000.0,
+                ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 2.35, 6.8).looking_at(Vec3::new(0.0, 0.32, 0.0), Vec3::Y),
+            ..default()
+        },
+        player::ForegroundCamera,
+        // MUST have same fog as main camera to blend correctly
+        FogSettings {
+            color: Color::BLACK,
+            falloff: FogFalloff::Linear { start: 0.0, end: 35.0 },
+            ..default()
+        },
+        BloomSettings {
+            intensity: 0.35,
+            prefilter_settings: bevy::core_pipeline::bloom::BloomPrefilterSettings {
+                threshold: 0.52,
+                threshold_softness: 0.2,
+            },
+            ..default()
+        },
+        bevy::render::view::RenderLayers::layer(2),
+    ));
+
+    // Floating Text Camera (Layer 1 - UI overlays)
+    commands.spawn((
+        Camera3dBundle {
+            camera: Camera {
+                order: 3, // Drawn last
+                clear_color: bevy::render::camera::ClearColorConfig::None,
+                ..default()
+            },
+            projection: Projection::Perspective(PerspectiveProjection {
+                fov: 75.0_f32.to_radians(),
+                near: 0.1,
                 far: 1500.0,
                 ..default()
             }),

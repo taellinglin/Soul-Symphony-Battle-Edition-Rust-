@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
+use bevy::render::view::{NoFrustumCulling, RenderLayers};
 use crate::components::{Spatial4D, Velocity4D, TransformHistory, CompressionState, PlayerVisuals};
 use crate::weapon_system::Weapon;
 
@@ -9,6 +10,7 @@ pub(crate) fn spawn_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut std_materials: ResMut<Assets<StandardMaterial>>,
+    _hyper_materials: ResMut<Assets<crate::rendering::HyperSliceMaterial>>,
     mut ball_materials: ResMut<Assets<crate::rendering::BallMaterial>>,
     save_data: Option<Res<crate::systems::progression::SaveData>>,
     asset_server: Res<AssetServer>,
@@ -61,9 +63,9 @@ pub(crate) fn spawn_player(
     let ball_material = ball_materials.add(crate::rendering::BallMaterial {
         base: StandardMaterial {
             base_color: Color::srgba(1.0, 1.0, 1.0, 1.0),
-            emissive: LinearRgba::new(5.0, 0.0, 0.0, 1.0),
+            emissive: LinearRgba::new(8.0, 0.5, 0.5, 1.0), // Boosted for Bloom glow
             alpha_mode: AlphaMode::Opaque,
-            unlit: true,
+            unlit: false, // Changed to false to allow some PBR shading interaction
             ..default()
         },
         extension: crate::rendering::BallExtension {
@@ -83,11 +85,12 @@ pub(crate) fn spawn_player(
         Velocity4D { lin_v: Vec3::ZERO, w_v: 0.0 },
         CompressionState { factor: 1.0, factor_smoothed: 1.0 },
         MaterialMeshBundle {
-            mesh: ball_mesh,
+            mesh: ball_mesh.clone(),
             material: ball_material,
             transform: Transform::from_xyz(0.0, 5.0, 0.0),
             ..default()
         },
+        RenderLayers::layer(2),
     )).insert((
         RigidBody::Dynamic,
         Collider::ball(BALL_RADIUS),
@@ -100,6 +103,22 @@ pub(crate) fn spawn_player(
         Velocity::default(),
         Damping { linear_damping: 0.28, angular_damping: 0.72 },
     )).with_children(|parent| {
+        // --- Inverted Hull Outline (Python Parity) ---
+        parent.spawn((
+            MaterialMeshBundle {
+                mesh: ball_mesh.clone(),
+                material: std_materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.01, 0.01, 0.015, 1.0),
+                    unlit: true,
+                    cull_mode: Some(bevy::render::render_resource::Face::Front),
+                    ..default()
+                }),
+                transform: Transform::from_scale(Vec3::splat(1.13)), // scale matches Python
+                ..default()
+            },
+            RenderLayers::layer(2),
+        ));
+
         // --- In-World UI ---
         parent.spawn((
             Text2dBundle {
@@ -170,6 +189,8 @@ pub(crate) fn spawn_player(
         });
     });
 
+    // Weapon and other components follow...
+
     // Spawn Weapon (Sword)
     commands.spawn((
         Weapon {
@@ -179,19 +200,152 @@ pub(crate) fn spawn_player(
         SpatialBundle {
             transform: Transform::from_xyz(0.0, 5.0, 0.0),
             ..default()
-        }
+        },
+        NoFrustumCulling, // Fix root entity culling the children
     )).with_children(|parent| {
-        parent.spawn(PbrBundle {
-            mesh: meshes.add(Cuboid::new(0.16, 0.1, 1.48)),
-            material: std_materials.add(StandardMaterial {
-                base_color: Color::srgb(0.8, 0.9, 1.0),
-                emissive: LinearRgba::new(0.2, 0.9, 1.0, 1.0),
-                unlit: false,
+        // ═══ Exact Python Parity: 7 sword parts ═══
+        // sword_scale = max(1.0, ball_radius / 0.4) = 1.7
+        // Panda3D→Bevy: X→X, Panda-Y(fwd)→Bevy -Z, Panda-Z(up)→Bevy Y
+        // Panda3D box model: unit cube [-0.5..0.5], setScale = full extents
+        // Bevy Cuboid::new = full extents (same as Python setScale)
+        let s: f32 = 1.7; // sword_scale
+
+        // 1. Guard  — Python: setPos(0, 0.2*s, 0), setScale(0.26*s, 0.05*s, 0.04*s), color(0.76, 0.84, 0.95, 1)
+        parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(0.26 * s, 0.04 * s, 0.05 * s)),
+                material: std_materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.76, 0.84, 0.95, 1.0),
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(0.0, 0.0, -0.2 * s),
                 ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 0.0, -0.74),
-            ..default()
-        });
+            },
+            NoFrustumCulling,
+            RenderLayers::layer(2),
+        ));
+
+        // 2. Grip   — Python: setPos(0, 0.03*s, 0), setScale(0.05*s, 0.14*s, 0.05*s), color(0.18, 0.22, 0.32, 1)
+        parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(0.05 * s, 0.05 * s, 0.14 * s)),
+                material: std_materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.18, 0.22, 0.32, 1.0),
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(0.0, 0.0, -0.03 * s),
+                ..default()
+            },
+            NoFrustumCulling,
+            RenderLayers::layer(2),
+        ));
+
+        // 3. Blade  — Python: setPos(0, 0.74*s, 0), setScale(0.082*s, 0.74*s, 0.052*s), color(0.82, 0.94, 1.0, 1)
+        //             emissive(0.45, 1.0, 1.0, 1.0)
+        parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(0.082 * s, 0.052 * s, 0.74 * s)),
+                material: std_materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.82, 0.94, 1.0, 1.0),
+                    emissive: LinearRgba::new(0.45, 1.0, 1.0, 1.0),
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(0.0, 0.0, -0.74 * s),
+                ..default()
+            },
+            NoFrustumCulling,
+            RenderLayers::layer(2),
+        ));
+
+        // 4. Tip    — Python: setPos(0, 1.37*s, 0), setScale(0.052*s, 0.12*s, 0.032*s), color(0.9, 0.98, 1.0, 1)
+        //             emissive(0.45, 1.0, 1.0, 1.0)
+        parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(0.052 * s, 0.032 * s, 0.12 * s)),
+                material: std_materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.9, 0.98, 1.0, 1.0),
+                    emissive: LinearRgba::new(0.45, 1.0, 1.0, 1.0),
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(0.0, 0.0, -1.37 * s),
+                ..default()
+            },
+            NoFrustumCulling,
+            RenderLayers::layer(2),
+        ));
+
+        // 5. Glow   — Python: setPos(0, 0.84*s, 0), setScale(0.062*s, 0.78*s, 0.034*s), color(0.18, 0.95, 1.0, 0.94)
+        //             transparent, depth_write=false, unlit
+        parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(0.062 * s, 0.034 * s, 0.78 * s)),
+                material: std_materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.18, 0.95, 1.0, 0.94),
+                    emissive: LinearRgba::new(0.45, 1.0, 1.0, 1.0),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Blend,
+                    depth_bias: 0.001,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(0.0, 0.0, -0.84 * s),
+                ..default()
+            },
+            NoFrustumCulling,
+            RenderLayers::layer(2),
+        ));
+
+        // 6. Stripe L — Python: setPos(-0.078*s, 0.8*s, 0), setScale(0.01*s, 0.72*s, 0.039*s), color(0.6, 1.0, 1.0, 0.92)
+        //               transparent, depth_write=false, unlit
+        parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(0.01 * s, 0.039 * s, 0.72 * s)),
+                material: std_materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.6, 1.0, 1.0, 0.92),
+                    emissive: LinearRgba::new(0.45, 1.0, 1.0, 1.0),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Blend,
+                    depth_bias: 0.002,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(-0.078 * s, 0.0, -0.8 * s),
+                ..default()
+            },
+            NoFrustumCulling,
+            RenderLayers::layer(2),
+        ));
+
+        // 7. Stripe R — mirror of Stripe L on +X
+        parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(Cuboid::new(0.01 * s, 0.039 * s, 0.72 * s)),
+                material: std_materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.6, 1.0, 1.0, 0.92),
+                    emissive: LinearRgba::new(0.45, 1.0, 1.0, 1.0),
+                    unlit: true,
+                    alpha_mode: AlphaMode::Blend,
+                    depth_bias: 0.002,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(0.078 * s, 0.0, -0.8 * s),
+                ..default()
+            },
+            NoFrustumCulling,
+            RenderLayers::layer(2),
+        ));
     });
 }
 

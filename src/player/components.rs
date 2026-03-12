@@ -12,6 +12,9 @@ pub struct InvertedEchoCamera;
 #[derive(Component)]
 pub struct FloatingTextCamera;
 
+#[derive(Component)]
+pub struct ForegroundCamera;
+
 #[derive(Component, Default)]
 pub struct PlayerStats {
     pub hp: f32,
@@ -64,7 +67,7 @@ pub struct GravityDirection(pub Vec3);
 
 impl Default for GravityDirection {
     fn default() -> Self {
-        Self(Vec3::new(0.0, -9.81, 0.0))
+        Self(Vec3::new(0.0, -19.62, 0.0))
     }
 }
 
@@ -155,9 +158,9 @@ impl Default for JumpState {
             infinite_jumps: true,
             jump_queued: false,
             jump_float_timer: 0.0,
-            jump_float_duration: 0.2,
+            jump_float_duration: 0.56,
             jump_float_drag: 5.8,
-            float_fall_drag: 2.2,
+            float_fall_drag: 2.4,
             hit_cooldown: 0.0,
             attack_cooldown: 0.0,
             player_damage_cooldown: 0.0,
@@ -176,8 +179,9 @@ pub struct PrevBallState {
 #[derive(Resource)]
 pub struct PhysicsTimers {
     pub roll_time: f32,
-    pub monster_contact_sfx_cooldown: f32,
     pub last_move_dir: Vec3,
+    pub monster_contact_sfx_cooldown: f32,
+    pub warp_cooldown: f32,
 }
 
 impl Default for PhysicsTimers {
@@ -185,6 +189,7 @@ impl Default for PhysicsTimers {
         Self {
             roll_time: 0.0,
             monster_contact_sfx_cooldown: 0.0,
+            warp_cooldown: 0.0,
             last_move_dir: -Vec3::Z,
         }
     }

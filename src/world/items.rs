@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::components::Spatial4D;
 use crate::player::Player;
 use rand::Rng;
+use bevy_rapier3d::prelude::*;
 
 pub struct ItemPlugin;
 
@@ -444,11 +445,12 @@ fn update_water_crystals(
         crystal.state_age += dt;
         
         // Use Rapier to find the floor directly below the crystal
+        // Use Rapier to find the floor directly below the crystal
         let mut water_h = tf.translation.y - 100.0; // fallback far below
         let ray_origin = tf.translation + Vec3::Y * 0.1; // start slightly above center to avoid intersecting from inside
         if let Some((_, toi)) = rapier_context.cast_ray(
             ray_origin, -Vec3::Y, 150.0, true,
-            bevy_rapier3d::prelude::QueryFilter::default().exclude_sensors()
+            QueryFilter::default().exclude_sensors().groups(CollisionGroups::new(Group::all(), Group::all().difference(Group::GROUP_32)))
         ) {
             water_h = ray_origin.y - toi;
         }

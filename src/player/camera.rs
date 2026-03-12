@@ -6,10 +6,11 @@ use super::components::*;
 use super::physics::rotate_around_axis;
 
 pub(crate) fn sync_camera(
-    player_query: Query<(Entity, &Transform, &Spatial4D, &Velocity, &CompressionState), (With<Player>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>)>,
-    mut camera_query: Query<(&mut Transform, &mut Projection), (With<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>)>,
-    mut floating_text_cam_query: Query<(&mut Transform, &mut Projection), (With<FloatingTextCamera>, Without<PlayerCamera>, Without<InvertedEchoCamera>)>,
-    mut inverted_query: Query<&mut Transform, (With<InvertedEchoCamera>, Without<PlayerCamera>, Without<FloatingTextCamera>)>,
+    player_query: Query<(Entity, &Transform, &Spatial4D, &Velocity, &CompressionState), (With<Player>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>, Without<ForegroundCamera>)>,
+    mut camera_query: Query<(&mut Transform, &mut Projection), (With<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>, Without<ForegroundCamera>)>,
+    mut floating_text_cam_query: Query<(&mut Transform, &mut Projection), (With<FloatingTextCamera>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<ForegroundCamera>)>,
+    mut foreground_cam_query: Query<(&mut Transform, &mut Projection), (With<ForegroundCamera>, Without<PlayerCamera>, Without<InvertedEchoCamera>, Without<FloatingTextCamera>)>,
+    mut inverted_query: Query<&mut Transform, (With<InvertedEchoCamera>, Without<PlayerCamera>, Without<FloatingTextCamera>, Without<ForegroundCamera>)>,
     mut materials: ResMut<Assets<crate::rendering::HyperSliceMaterial>>,
     mut ball_materials: ResMut<Assets<crate::rendering::BallMaterial>>,
     mut water_materials: ResMut<Assets<crate::rendering::WaterSurfaceMaterial>>,
@@ -238,6 +239,15 @@ pub(crate) fn sync_camera(
             }
         }
 
+        // Sync Foreground Camera
+        if let Ok((mut fg_cam_tf, mut fg_proj)) = foreground_cam_query.get_single_mut() {
+            fg_cam_tf.translation = resolved_cam;
+            fg_cam_tf.rotation = camera_tf.rotation;
+            if let Projection::Perspective(ref mut fg_persp) = *fg_proj {
+                fg_persp.fov = fov.to_radians();
+            }
+        }
+
         // ── Inverted echo camera ──
         if let Ok(mut inv_camera_tf) = inverted_query.get_single_mut() {
             let reflection_plane_y = 0.28; // Water surface raise parity
@@ -269,8 +279,8 @@ pub(crate) fn sync_camera(
     }
     for (_, material) in water_materials.iter_mut() {
         material.extension.settings.player_w = spatial.w;
-        material.extension.settings.fog_color = LinearRgba::new(0.1, 0.12, 0.17, 1.0);
+        material.extension.settings.fog_color = LinearRgba::BLACK;
         material.extension.settings.fog_start = 0.0;
-        material.extension.settings.fog_end = 120.0;
+        material.extension.settings.fog_end = 35.0;
     }
 }

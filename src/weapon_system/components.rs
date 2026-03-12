@@ -76,9 +76,15 @@ pub struct MagicMissile {
     pub life: f32,
 }
 
-// Fixed constants from Python for ball_radius = 0.68
-pub(crate) const SWORD_SCALE: f32 = 1.7; // max(1.0, 0.68 / 0.4)
-pub(crate) const UP_OFFSET: f32 = 0.84; // 0.68 + 0.16
-pub(crate) const FWD_OFFSET: f32 = 0.578; // 0.34 * 1.7
-pub(crate) const SIDE_OFFSET: f32 = 0.275; // 0.22 * min(1.25, 1.7)
-pub(crate) const REACH: f32 = 3.06; // 1.8 * 1.7
+// Python parity: setup_weapon_system with ball_radius = 0.68
+// sword_scale = max(1.0, ball_radius / 0.4) = 1.7
+// up    = max(0.36, ball_radius + 0.16)            = 0.84
+// fwd   = max(0.34, 0.34 * sword_scale)            = 0.578
+// side  = max(0.22, 0.22 * min(1.25, sword_scale)) = 0.275
+// reach = max(1.8,  1.8  * sword_scale)             = 3.06
+pub(crate) const SWORD_SCALE: f32 = 1.7;
+pub(crate) const SWORD_GEO_SCALE: f32 = 1.7; // Geometry scale for sword mesh parts
+pub(crate) const UP_OFFSET: f32 = 0.84;
+pub(crate) const FWD_OFFSET: f32 = 0.578;
+pub(crate) const SIDE_OFFSET: f32 = 0.275;
+pub(crate) const REACH: f32 = 3.06;

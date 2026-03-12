@@ -27,6 +27,7 @@ struct WaterSurfaceSettings {
     fog_start: f32,
     fog_end: f32,
     reflection_strength: f32,
+    time: f32,
     fog_color: vec4<f32>,
 }
 
@@ -158,67 +159,75 @@ fn fragment(
     @builtin(front_facing) is_front: bool,
 ) -> @location(0) vec4<f32> {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
-    let time = globals.time;
-    let v_world_xy = in.world_position.xz;
+    let time = settings.time;
     let v_world_pos = in.world_position.xyz;
 
+    // Standard structural density (clumpy look)
     var local_w = compute_level_w_like(v_world_pos);
     var density = (local_w + 2.25) / 4.5;
     
-    if (settings.static_uv > 0.5) {
-        var static_pos = v_world_pos;
-        static_pos.x *= 6.0;
-        static_pos.z *= 6.0;
-        local_w = compute_level_w_like(static_pos);
-        density = (local_w + 2.25) / 4.5;
-        let micro = fbm(static_pos.xz * 0.35 + vec2(9.1, -4.3));
-        density = clamp(density * 1.25 + (micro - 0.5) * 0.35 + 0.05, 0.0, 1.0);
-    } else {
-        let micro = fbm(v_world_xy * 0.12 + vec2(5.4, -2.2));
-        density = clamp(density + (micro - 0.5) * 0.4, 0.0, 1.0);
-    }
-
+    // Micro-noise synced with ceiling
+    let micro = fbm(v_world_pos.xz * 0.12 + vec2(5.4, -2.2));
+    density = clamp(density + (micro - 0.5) * 0.4, 0.0, 1.0);
+    
+    // Parity: Apply density contrast and gamma before smoothing
     density = clamp(density * settings.density_contrast, 0.0, 1.0);
     density = pow(density, settings.density_gamma);
     density = smoothstep(0.0, 1.0, density);
 
-    var thermal_col = roygbiv_thermal(density);
-    let cycle_mix = clamp(settings.rainbow_strength, 0.0, 1.0);
-    if (cycle_mix > 0.001) {
-        let cycle_col = roygbiv_thermal(density);
-        thermal_col = mix(thermal_col, cycle_col, cycle_mix);
-    }
-
-    let uv = v_world_xy * max(0.02, settings.uv_scale * 0.08);
-    let flow_a = vec2(time * 0.09, -time * 0.05);
-    let flow_b = vec2(-time * 0.06, time * 0.07);
+    var thermal_color = roygbiv_thermal(density);
 
     // Procedural Ripples (Liquid surface movement)
-    let ripple_uv = v_world_xy * 0.12;
+    let ripple_uv = v_world_pos.xz * 0.12;
     var combined_ripples = 0.0;
     combined_ripples += sin(ripple_uv.x * 3.5 + time * 1.8) * 0.45;
     combined_ripples += sin(ripple_uv.y * 2.8 - time * 1.4) * 0.35;
     combined_ripples += sin((ripple_uv.x + ripple_uv.y) * 4.2 + time * 2.2) * 0.25;
     
+    // Final noise for color cycling sync
+    let uv = v_world_pos.xz * 0.08; 
+    let flow_a = vec2(time * 0.09, -time * 0.05);
+    let flow_b = vec2(-time * 0.06, time * 0.07);
+    
     let n0 = fbm(uv * 1.15 + flow_a + combined_ripples * 0.05);
     let n1 = fbm(uv * 0.76 - flow_b - combined_ripples * 0.07);
     let combined_noise = (n0 * 0.6 + n1 * 0.4);
 
-    // Python parity: water alpha logic
-    // Lower base alpha to see player through water surface
-    var alpha = settings.alpha * (0.6 + combined_noise * 0.4);
-    
-    // Thermal effect logic
-    let thermal_val = clamp(combined_noise * settings.density_contrast + settings.density_gamma, 0.0, 1.0);
-    let thermal_color = roygbiv_thermal(thermal_val);
-    let total_thermal = settings.thermal_strength * settings.thermal_mode;
+    // Base deep water color foundation
+    let base_water = vec3(0.06, 0.08, 0.15); // Deep Navy
     
     // Specular highlight boost for ripple visibility
     let spec_highlight = pow(combined_noise, 6.0) * settings.spec_strength;
     
-    // Final composite
-    let water_base = vec3(0.19, 0.22, 0.28); // Python parity 
-    var final_rgb = mix(water_base, thermal_color.rgb, total_thermal);
+    // Slow HSV hue cycling - speed 0.2
+    let hue = fract(time * 0.2 + combined_noise * 0.4);
+    let sat = 0.82;
+    let val = 0.95;
+    let hi = floor(hue * 6.0) % 6.0;
+    let f_hue = hue * 6.0 - floor(hue * 6.0);
+    let p = val * (1.0 - sat);
+    let q = val * (1.0 - sat * f_hue);
+    let t_val = val * (1.0 - sat * (1.0 - f_hue));
+    var cycle_color: vec3<f32>;
+    if (hi < 1.0) {
+        cycle_color = vec3(val, t_val, p);
+    } else if (hi < 2.0) {
+        cycle_color = vec3(q, val, p);
+    } else if (hi < 3.0) {
+        cycle_color = vec3(p, val, t_val);
+    } else if (hi < 4.0) {
+        cycle_color = vec3(p, q, val);
+    } else if (hi < 5.0) {
+        cycle_color = vec3(t_val, p, val);
+    } else {
+        cycle_color = vec3(val, p, q);
+    }
+
+    // Blend thermal ROYGBIV pattern with the slow hue cycle
+    let thermal_cycle = mix(cycle_color, thermal_color.rgb, 0.5);
+    
+    // Use alpha as 'intensity' over the deep navy base
+    var final_rgb = mix(base_water, thermal_cycle, settings.alpha);
     final_rgb += spec_highlight;
     
     // Reflection Logic
@@ -229,10 +238,11 @@ fn fragment(
         final_rgb = mix(final_rgb, reflection_sample, settings.reflection_strength * (0.3 + fresnel * 0.7));
     }
 
-    // Apply linear fog (black void)
+    // Restore horizon fog (Void parity)
     let dist = distance(view.world_position, v_world_pos);
     let fog_factor = clamp((settings.fog_end - dist) / (settings.fog_end - settings.fog_start), 0.0, 1.0);
-    final_rgb = mix(vec3(0.0, 0.0, 0.0), final_rgb, fog_factor);
+    // Fix gray line: use settings.fog_color instead of hardcoded black
+    final_rgb = mix(settings.fog_color.rgb, final_rgb, fog_factor);
 
-    return vec4<f32>(final_rgb, alpha * fog_factor);
+    return vec4<f32>(final_rgb, 1.0);
 }

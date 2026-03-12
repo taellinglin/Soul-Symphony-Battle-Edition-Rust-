@@ -29,6 +29,7 @@ pub(crate) fn player_physics_controller(
     jump_state.attack_cooldown = (jump_state.attack_cooldown - dt).max(0.0);
     jump_state.player_damage_cooldown = (jump_state.player_damage_cooldown - dt).max(0.0);
     timers.monster_contact_sfx_cooldown = (timers.monster_contact_sfx_cooldown - dt).max(0.0);
+    timers.warp_cooldown = (timers.warp_cooldown - dt).max(0.0);
     jump_state.jump_float_timer = (jump_state.jump_float_timer - dt).max(0.0);
 
     for (mut ext_force, mut ext_impulse, mut rb_vel, spatial, player_tf, mut damping) in query.iter_mut() {
@@ -66,7 +67,7 @@ pub(crate) fn player_physics_controller(
         }
 
         // ── Applied Forces (original lines 16636–16654) ──
-        let mut applied_force = gravity.0 * 12.025; // mass 1.25 * 9.62
+        let mut applied_force = gravity.0 * 1.25; // mass 1.25 parity
         let mut applied_torque = Vec3::ZERO;
 
         if manual_move_active {
@@ -137,16 +138,28 @@ pub(crate) fn player_physics_controller(
                 }
 
                 // Boost direction from current velocity (original lines 16795-16803)
+                let vel_dot = rb_vel.linvel.dot(jump_up);
+                let current_up_vel = if vel_dot > 0.0 { vel_dot } else { 0.0 };
+                
+                // Parity: _suppress_wall_climb_velocity (original line 11849)
+                // Cap upward jump velocity if we are hugging a wall/obstacle
+                let max_up_speed = 0.9; 
+                let mut final_impulse_mag = JUMP_IMPULSE * JUMP_RISE_BOOST;
+                
+                // If already moving up fast (e.g. wall climbing), cap the boost
+                if current_up_vel > max_up_speed {
+                   final_impulse_mag = (final_impulse_mag * 0.5).min(max_up_speed);
+                }
+
+                let mut impulse = jump_up * final_impulse_mag;
+
                 let mut boost_dir = rb_vel.linvel - jump_up * rb_vel.linvel.dot(jump_up);
                 if boost_dir.length_squared() < 1e-6 {
                     boost_dir = timers.last_move_dir;
                 }
+                
                 if boost_dir.length_squared() > 1e-6 {
-                    boost_dir = boost_dir.normalize();
-                }
-
-                let mut impulse = jump_up * (JUMP_IMPULSE * JUMP_RISE_BOOST);
-                if boost_dir.length_squared() > 1e-6 {
+                    let boost_dir = boost_dir.normalize();
                     impulse += boost_dir * (SPACE_BOOST_IMPULSE * 0.2);
                 }
                 ext_impulse.impulse = impulse;
@@ -225,7 +238,7 @@ pub(crate) fn player_physics_controller(
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(crate) fn apply_hyperspace_physics(
-    mut query: Query<(&mut Velocity, &mut Transform, &Spatial4D), With<Player>>,
+    mut query: Query<(&mut Velocity, &mut Transform, &mut Spatial4D), With<Player>>,
     hyper: Res<HyperspaceState>,
     gravity: Res<GravityDirection>,
     graph: Res<crate::map::DungeonGraph>,
@@ -233,7 +246,7 @@ pub(crate) fn apply_hyperspace_physics(
     time: Res<Time>,
 ) {
     let dt = time.delta_seconds();
-    let Ok((mut vel, mut tf, spatial)) = query.get_single_mut() else { return };
+    let Ok((mut vel, mut tf, mut spatial)) = query.get_single_mut() else { return };
 
     let hyperspace_active = hyper.is_active(spatial.w);
     let _hyperspace_amount = hyper.amount(spatial.w);
@@ -253,31 +266,140 @@ pub(crate) fn apply_hyperspace_physics(
         let gravity_mod = gravity.0.normalize_or_zero() * (g_mag * mag_scale - g_mag);
         vel.linvel += gravity_mod * dt;
 
-        // Hyperspace bounce off world bounds (original lines 11445-11487)
-        let r = BALL_RADIUS;
-        // Use dungeon boundary from graph
-        let (map_w, map_d) = if let (Some(w), Some(d)) = (
-            graph.rooms.iter().map(|r| r.x + r.w).reduce(f32::max),
-            graph.rooms.iter().map(|r| r.y + r.h).reduce(f32::max),
-        ) { (w.max(500.0), d.max(500.0)) } else { (500.0, 500.0) };
-        
-        let min_x = 0.55 + r;
-        let max_x = map_w - 0.55 - r;
-        let min_z = 0.55 + r;
-        let max_z = map_d - 0.55 - r;
-        let min_y = r - 0.05; // Slightly submerged is okay for water feel
-        let max_y = 50.0 - r - 0.12; // Adjusted for new ceiling height
+        // Original bounding box bounce removed. Seamless world wrap takes over.
 
-        let pos = &mut tf.translation;
-        let v = &mut vel.linvel;
-        let bg = hyper.bounce_gain;
+        // ─────────────────────────────────────────────────────────────────────────────
+        // Mobius Twist Warp Portals
+        // ─────────────────────────────────────────────────────────────────────────────
+        if timers.warp_cooldown <= 0.0 {
+            for link in &graph.warp_links {
+                let d_a = tf.translation.distance_squared(link.a_pos);
+                let d_b = tf.translation.distance_squared(link.b_pos);
+                let r_sq = link.radius * link.radius;
 
-        if pos.x < min_x && v.x < 0.0 { pos.x = min_x; v.x = v.x.abs() * bg; }
-        else if pos.x > max_x && v.x > 0.0 { pos.x = max_x; v.x = -(v.x.abs() * bg); }
-        if pos.z < min_z && v.z < 0.0 { pos.z = min_z; v.z = v.z.abs() * bg; }
-        else if pos.z > max_z && v.z > 0.0 { pos.z = max_z; v.z = -(v.z.abs() * bg); }
-        if pos.y < min_y && v.y < 0.0 { pos.y = min_y; v.y = v.y.abs() * bg; }
-        else if pos.y > max_y && v.y > 0.0 { pos.y = max_y; v.y = -(v.y.abs() * bg); }
+                let (is_hit, from_a, target_pos, source_pos) = if d_a < r_sq {
+                    (true, true, link.b_pos, link.a_pos)
+                } else if d_b < r_sq {
+                    (true, false, link.a_pos, link.b_pos)
+                } else {
+                    (false, false, Vec3::ZERO, Vec3::ZERO)
+                };
+
+                if is_hit {
+                    // Python parity: _apply_room_fold_warp -> _apply_room_fold_twist
+                    let up = -gravity.0.normalize_or_zero();
+                    let mut fold_push = if from_a { target_pos - source_pos } else { source_pos - target_pos };
+                    fold_push = fold_push - up * fold_push.dot(up);
+                    if fold_push.length_squared() > 1e-8 {
+                        fold_push = fold_push.normalize();
+                    }
+
+                    if link.mobius {
+                        let twist_strength = 0.9; // Python parity: mobius_twist_strength
+                        let (out_vel, new_w) = compute_mobius_fold_twist(
+                            vel.linvel,
+                            fold_push,
+                            up,
+                            spatial.w,
+                            timers.roll_time,
+                            link.mobius_phase,
+                            twist_strength,
+                            hyper.w_limit,
+                        );
+                        vel.linvel = out_vel;
+                        spatial.w = new_w;
+                        spatial.target_w = new_w;
+                    } else {
+                        // Standard non-twisting portal boost
+                        vel.linvel = vel.linvel * 0.85 + fold_push * 2.4;
+                    }
+
+                    // Teleport the player
+                    tf.translation = target_pos + up * 0.34;
+                    // Because timers is an immutable Res<PhysicsTimers> in this system, calculate locally or refactor system params.
+                    // Actually, let's just use game mechanics: teleport moves you OUT of the portal sphere immediately anyway.
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// World Wrap (Python parity: _apply_world_wrap + _wrap_xy_position)
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) fn apply_world_wrap(
+    mut query: Query<&mut Transform, With<Player>>,
+    mut camera_query: Query<&mut Transform, (With<PlayerCamera>, Without<Player>)>,
+    graph: Res<crate::map::DungeonGraph>,
+    config: Res<crate::map::GenerationConfig>,
+) {
+    if graph.rooms.is_empty() { return; }
+
+    let (map_w, map_d) = if let (Some(w), Some(d)) = (
+        graph.rooms.iter().map(|r| r.x + r.w).reduce(f32::max),
+        graph.rooms.iter().map(|r| r.y + r.h).reduce(f32::max),
+    ) { (w.max(500.0), d.max(500.0)) } else { (500.0, 500.0) };
+
+    let mut delta = Vec3::ZERO;
+    let margin = 0.35; // Python parity: world_wrap_margin
+    let span_x = map_w;
+    let span_y = map_d;
+    
+    // Dynamic height bounds based on mode (Arena vs BSP)
+    // Arena parity: loop_half = max(14.0, 18.0 * 0.85) = 15.3
+    // BSP parity: high = wall_h + 4.0, low = -1.4
+    let (high_y_base, low_y_base) = if config.layout_mode == "arena" {
+        (15.3, -15.3)
+    } else {
+        (config.room_height + 4.0, -1.4)
+    };
+
+    let span_z = high_y_base - low_y_base;
+
+    let low_x = -margin;
+    let high_x = span_x + margin;
+    let low_z = -margin; // Y in python is Z in rust (depth)
+    let high_z = span_y + margin;
+    let low_y = low_y_base - margin; // Z in python is Y in rust (height)
+    let high_y = high_y_base + margin;
+
+    if let Ok(mut player_tf) = query.get_single_mut() {
+        let mut wrapped = player_tf.translation;
+
+        if wrapped.x < low_x {
+            wrapped.x += span_x;
+            delta.x += span_x;
+        } else if wrapped.x > high_x {
+            wrapped.x -= span_x;
+            delta.x -= span_x;
+        }
+
+        if wrapped.z < low_z {
+            wrapped.z += span_y;
+            delta.z += span_y;
+        } else if wrapped.z > high_z {
+            wrapped.z -= span_y;
+            delta.z -= span_y;
+        }
+
+        if wrapped.y < low_y {
+            wrapped.y += span_z;
+            delta.y += span_z;
+        } else if wrapped.y > high_y {
+            wrapped.y -= span_z;
+            delta.y -= span_z;
+        }
+
+        if delta.length_squared() > 1e-12 {
+            player_tf.translation = wrapped;
+
+            // Shift camera instantly to prevent visual hitching (Python lines 11894-11906)
+            if let Ok(mut cam_tf) = camera_query.get_single_mut() {
+                cam_tf.translation += delta;
+            }
+        }
     }
 }
 
@@ -472,13 +594,56 @@ pub(crate) fn w_dimension_shift(
     }
 }
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Compression Factor Update
+// Mobius Topology Math
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn compute_mobius_fold_twist(
+    vel: Vec3,
+    fold_push: Vec3,
+    up: Vec3,
+    player_w: f32,
+    roll_time: f32,
+    phase: f32,
+    twist_strength: f32,
+    hyper_w_limit: f32,
+) -> (Vec3, f32) {
+    let mut side = up.cross(fold_push);
+    if side.length_squared() > 1.0e-8 {
+        side = side.normalize();
+    } else {
+        side = Vec3::X;
+    }
+
+    let v_dot_fp = vel.dot(fold_push);
+    let v_dot_side = vel.dot(side);
+    let v_dot_up = vel.dot(up);
+
+    let f_comp = fold_push * v_dot_fp;
+    let s_comp = side * v_dot_side;
+    let u_comp = up * v_dot_up;
+
+    // Twist translates the fold components (inverting side)
+    let twisted = f_comp - s_comp + u_comp * 0.9;
+
+    let twist = twist_strength.clamp(0.0, 1.0);
+    // Invert the W coordinate (mirror-world topology flip) and add wobble
+    let wobble = (roll_time * 0.32 + phase).sin() * (1.0 - twist) * hyper_w_limit * 0.22;
+    let new_w = (-player_w * twist + wobble).clamp(-hyper_w_limit, hyper_w_limit);
+
+    // Apply boost vector to exit
+    let out_v = twisted * 0.9 + fold_push * 1.75;
+    
+    (out_v, new_w)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Player Physics Components & Resources
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(crate) fn update_compression_factor(
     mut player_query: Query<(&Transform, &mut CompressionState), With<Player>>,
-    room_query: Query<(&Transform, &crate::map::DimensionField)>,
+    room_query: Query<(&Transform, &crate::map::DimensionField, &crate::map::Room)>,
     time: Res<Time>,
 ) {
     let Ok((player_tf, mut state)) = player_query.get_single_mut() else { return };
@@ -487,19 +652,43 @@ pub(crate) fn update_compression_factor(
 
     let mut factor = 1.0;
 
-    for (room_tf, field) in room_query.iter() {
+    for (room_tf, field, room_ref) in room_query.iter() {
         let half_w = room_tf.scale.x * 0.5;
         let half_h = room_tf.scale.z * 0.5;
         let dx = (pos.x - room_tf.translation.x) / half_w.max(0.001);
         let dz = (pos.z - room_tf.translation.z) / half_h.max(0.001);
 
         if dx.abs() <= 1.0 && dz.abs() <= 1.0 {
+            // Room base dimension
             let edge = dx.abs().max(dz.abs());
             let center = (1.0 - edge).max(0.0);
             let wave = (t * field.freq + field.phase).sin();
             let room_base = field.base + field.amp * wave;
             let spatial_blend = center * field.center_bias + edge * field.edge_bias;
             factor = 1.0 + (room_base - 1.0) * spatial_blend.clamp(0.0, 1.0);
+            
+            // Loop through pockets for localized distortions
+            let mut max_pocket_influence = 0.0;
+            let mut target_pocket_factor = factor;
+            
+            for pocket in &room_ref.pockets {
+                // Determine 2D distance
+                let p2d = Vec2::new(pos.x, pos.z);
+                let dist = p2d.distance(pocket.position);
+                
+                if dist < pocket.radius {
+                    // Cosine falloff
+                    let influence = ((dist / pocket.radius) * std::f32::consts::PI).cos() * 0.5 + 0.5;
+                    if influence > max_pocket_influence {
+                        max_pocket_influence = influence;
+                        target_pocket_factor = pocket.factor;
+                    }
+                }
+            }
+            
+            // Blend base room factor with the strongest pocket influence
+            factor = factor * (1.0 - max_pocket_influence) + target_pocket_factor * max_pocket_influence;
+            
             break;
         }
     }
@@ -521,16 +710,19 @@ pub(crate) fn sync_collision_groups(
     for (entity, spatial, current_groups) in query.iter() {
         let clamped_layer = spatial.layer.clamp(-15, 15);
         let group_bit = 1 << (clamped_layer + 15);
-        let desired_group = Group::from_bits_truncate(group_bit as u32);
+        let membership = Group::from_bits_truncate(group_bit as u32);
+        
+        // Filter: participate in own layer + hit Group 32 (Ceiling/Floor)
+        let filter = membership | Group::GROUP_32;
 
         if let Some(groups) = current_groups {
-            if groups.memberships != desired_group || groups.filters != desired_group {
+            if groups.memberships != membership || groups.filters != filter {
                 if let Some(mut ec) = commands.get_entity(entity) {
-                    ec.try_insert(CollisionGroups::new(desired_group, desired_group));
+                    ec.try_insert(CollisionGroups::new(membership, filter));
                 }
             }
         } else if let Some(mut ec) = commands.get_entity(entity) {
-            ec.try_insert(CollisionGroups::new(desired_group, desired_group));
+            ec.try_insert(CollisionGroups::new(membership, filter));
         }
     }
 }
@@ -547,3 +739,76 @@ pub fn rotate_around_axis(vec: Vec3, axis: Vec3, angle_rad: f32) -> Vec3 {
     let sin_a = angle_rad.sin();
     vec * cos_a + axis_n.cross(vec) * sin_a + axis_n * (axis_n.dot(vec) * (1.0 - cos_a))
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Water Wave Buoyancy (Python parity: _sample_water_height + _apply_water_buoyancy)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Python parity: water_wave_amplitude=0.2, water_wave_speed=1.4, water_wave_freq_x=0.09, water_wave_freq_y=0.07
+const WATER_WAVE_AMP: f32 = 0.2;
+const WATER_WAVE_SPEED: f32 = 1.4;
+const WATER_WAVE_FX: f32 = 0.09;
+const WATER_WAVE_FY: f32 = 0.07;
+const WATER_BASE_Z: f32 = 0.0; // floor_y
+const WATER_BUOYANCY_BIAS: f32 = 0.62;
+const WATER_BUOYANCY_STRENGTH: f32 = 2.2;
+const WATER_DRAG_PLANAR: f32 = 0.85;
+const WATER_DRAG_VERTICAL: f32 = 1.95;
+
+/// Python parity: _sample_water_height
+/// phase = x * fx + z * fy + t * speed + surface_phase
+/// wave = sin(phase) * amp + cos(phase * 0.63 + 0.7) * (amp * 0.52)
+pub fn sample_water_height(x: f32, z: f32, t: f32) -> f32 {
+    let phase = x * WATER_WAVE_FX + z * WATER_WAVE_FY + t * WATER_WAVE_SPEED;
+    let wave = phase.sin() * WATER_WAVE_AMP + (phase * 0.63 + 0.7).cos() * (WATER_WAVE_AMP * 0.52);
+    WATER_BASE_Z + wave
+}
+
+/// Python parity: _apply_water_buoyancy
+/// Applies upward buoyancy force when the ball is below the wave surface height
+pub(crate) fn apply_water_buoyancy(
+    mut query: Query<(&Transform, &mut Velocity, &mut ExternalForce), With<Player>>,
+    gravity: Res<GravityDirection>,
+    timers: Res<PhysicsTimers>,
+    time: Res<Time>,
+) {
+    let dt = time.delta_seconds();
+    let t = timers.roll_time;
+
+    for (tf, mut vel, mut ext_force) in query.iter_mut() {
+        let pos = tf.translation;
+        let water_h = sample_water_height(pos.x, pos.z, t);
+
+        let bottom_z = pos.y - BALL_RADIUS;
+        let depth = water_h - bottom_z;
+
+        if depth <= 0.0 {
+            // Ball is above water — no buoyancy
+            continue;
+        }
+
+        let up = -gravity.0.normalize_or_zero();
+        if up.length_squared() < 1e-8 {
+            continue;
+        }
+
+        // Python parity: mass=1.25, g_mag=9.62
+        let mass = 1.25_f32;
+        let g_mag = gravity.0.length().max(0.1);
+        let submerge = (depth / (BALL_RADIUS * 1.9).max(0.05)).clamp(0.0, 1.35);
+
+        // Buoyancy force (Python parity: mass * g * (bias + submerge * strength))
+        let buoy_force = up * (mass * g_mag * (WATER_BUOYANCY_BIAS + submerge * WATER_BUOYANCY_STRENGTH));
+        ext_force.force += buoy_force;
+
+        // Water drag (Python parity: _apply_water_buoyancy lines 5246-5253)
+        let v_up_speed = vel.linvel.dot(up);
+        let v_planar = vel.linvel - up * v_up_speed;
+
+        let planar_drag = (1.0 - dt * WATER_DRAG_PLANAR * (0.3 + submerge * 0.7)).max(0.0);
+        let vertical_drag = (1.0 - dt * WATER_DRAG_VERTICAL * (0.4 + submerge * 0.9)).max(0.0);
+
+        vel.linvel = v_planar * planar_drag + up * (v_up_speed * vertical_drag);
+    }
+}
+

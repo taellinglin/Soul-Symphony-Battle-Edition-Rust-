@@ -55,7 +55,7 @@ fn update_monster_ai(
         let ray_origin = tf.translation + Vec3::Y * 0.1;
         if let Some((_, toi)) = rapier_context.cast_ray(
             ray_origin, -Vec3::Y, 150.0, true,
-            QueryFilter::default().exclude_sensors()
+            QueryFilter::default().exclude_sensors().groups(CollisionGroups::new(Group::all(), Group::all().difference(Group::GROUP_32)))
         ) {
             floor_y = ray_origin.y - toi;
         }

@@ -13,6 +13,7 @@ struct ThermalSettings {
     compression_factor: f32,
     fog_start: f32,
     fog_end: f32,
+    fog_color: vec4<f32>,
 }
 
 @group(2) @binding(100) var<uniform> settings: ThermalSettings;
@@ -163,7 +164,8 @@ fn fragment(
     let dist = distance(view.world_position, world_pos);
     let fog_range = max(0.001, settings.fog_end - settings.fog_start);
     let fog_factor = clamp((settings.fog_end - dist) / fog_range, 0.0, 1.0);
-    final_col = mix(vec3<f32>(0.0, 0.0, 0.0), final_col, fog_factor);
+    // Fix gray line: use settings.fog_color instead of hardcoded black
+    final_col = mix(settings.fog_color.rgb, final_col, fog_factor);
     
     pbr_input.material.base_color = vec4<f32>(clamp(final_col, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     

@@ -11,6 +11,15 @@ pub struct Spatial4D {
     pub is_folded: bool,       // Whether the entity is currently subject to Mobius folding
 }
 
+#[derive(Clone, Debug)]
+pub struct WarpLink {
+    pub a_pos: Vec3,
+    pub b_pos: Vec3,
+    pub radius: f32,
+    pub mobius: bool,
+    pub mobius_phase: f32,
+}
+
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 pub struct Velocity4D {
     pub lin_v: Vec3,           // 3D linear velocity
