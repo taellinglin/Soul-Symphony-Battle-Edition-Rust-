@@ -38,6 +38,7 @@ pub struct LocalPlayerXpBar;
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Resource)]
+#[allow(dead_code)]
 pub struct CameraOrbitState {
     pub smoothed_dir: Vec3,
     pub heading: f32,

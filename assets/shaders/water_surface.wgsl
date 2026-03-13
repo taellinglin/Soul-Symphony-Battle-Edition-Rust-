@@ -173,13 +173,22 @@ fn fragment(
     let world_pos = in.world_position.xyz;
     let world_xz = world_pos.xz;
 
-    // Structural density field (thermal bands)
-    var local_w = compute_level_w_like(world_pos);
-    var density = (local_w + 2.25) / 4.5;
-
-    // Micro-noise for clumpy structure
-    let micro = fbm(world_xz * 0.12 + vec2(5.4, -2.2));
-    density = clamp(density + (micro - 0.5) * 0.4, 0.0, 1.0);
+    // Structural density field (thermal bands) with optional static-UV camo pass
+    var local_w: f32;
+    var density: f32;
+    if (settings.static_uv > 0.5) {
+        let static_xz = world_xz * 6.0;
+        let static_pos = vec3(static_xz.x, world_pos.y, static_xz.y);
+        local_w = compute_level_w_like(static_pos);
+        density = (local_w + 2.25) / 4.5;
+        let micro = fbm(static_pos.xz * 0.35 + vec2(9.1, -4.3));
+        density = clamp(density * 1.25 + (micro - 0.5) * 0.35 + 0.05, 0.0, 1.0);
+    } else {
+        local_w = compute_level_w_like(world_pos);
+        density = (local_w + 2.25) / 4.5;
+        let micro = fbm(world_xz * 0.12 + vec2(5.4, -2.2));
+        density = clamp(density + (micro - 0.5) * 0.4, 0.0, 1.0);
+    }
 
     density = clamp(density * settings.density_contrast, 0.0, 1.0);
     density = pow(density, settings.density_gamma);
@@ -264,15 +273,28 @@ fn fragment(
     let compression_mix = clamp(settings.compression_thermal_strength, 0.0, 1.0);
     final_rgb = mix(final_rgb, compression_col, compression_mix);
 
+    if (settings.thermal_mode > 0.5) {
+        let field_a = fbm(world_xz * 0.08 + vec2(13.2, -7.4) + vec2(time * 0.01, -time * 0.013));
+        let field_b = fbm(world_xz * 0.18 + vec2(-4.7, 9.1) + vec2(-time * 0.012, time * 0.009));
+        let field_c = fbm(world_xz * 0.35 + vec2(2.1, -3.6) + vec2(time * 0.008, time * 0.007));
+        let field = clamp(0.15 + field_a * 0.55 + field_b * 0.28 + field_c * 0.12, 0.0, 1.0);
+        let radar_val = clamp(field + compression_intensity * 0.6, 0.0, 1.0);
+        let band_steps = 9.0;
+        let band_pos = radar_val * band_steps;
+        let banded = floor(band_pos) / band_steps;
+        let band_edge = smoothstep(0.35, 0.6, fract(band_pos));
+        let band_val = mix(banded, clamp(banded + 1.0 / band_steps, 0.0, 1.0), band_edge);
+        let band_col = radar_palette(band_val);
+        let contour = smoothstep(0.48, 0.52, fract(band_pos));
+        let thermal_band = mix(band_col, vec3(0.95, 0.98, 1.0), contour * 0.2);
+        let thermal_blend = clamp(settings.thermal_strength * 0.6, 0.0, 1.0);
+        final_rgb = mix(final_rgb, thermal_band, thermal_blend);
+    }
+
     if (!thermal_only && settings.room_tex_strength > 0.01) {
         final_rgb = clamp(final_rgb + room_desat * clamp(settings.room_tex_strength, 0.0, 1.0), vec3(0.0), vec3(1.0));
     }
     final_rgb = clamp(final_rgb, vec3(0.0), vec3(1.0));
-
-    // Mild spec-based hue shift (matches original GLSL behaviour)
-    if (settings.spec_strength > 0.01) {
-        final_rgb = hue_shift(final_rgb, time * 0.18);
-    }
 
     // Reflection (uses offscreen inverted-echo texture when enabled)
     if (settings.reflection_strength > 0.001) {

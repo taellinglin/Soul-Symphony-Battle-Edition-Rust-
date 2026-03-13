@@ -48,68 +48,77 @@ fn fbm(in_p: vec2<f32>) -> f32 {
     return f;
 }
 
-// --- Colormaps ---
-fn roygbiv_thermal(t: f32) -> vec3<f32> {
-    let x = clamp(t, 0.0, 1.0);
+fn roygbiv_thermal(t_in: f32) -> vec3<f32> {
+    let x = clamp(t_in, 0.0, 1.0);
     var c0: vec3<f32>;
     var c1: vec3<f32>;
     var local: f32;
     let band = 1.0 / 7.0;
     
     if (x < band) {
-        c0 = vec3<f32>(1.0, 0.0, 0.0);
-        c1 = vec3<f32>(1.0, 0.5, 0.0);
+        c0 = vec3(1.0, 0.0, 0.0);
+        c1 = vec3(1.0, 0.5, 0.0);
         local = x / band;
     } else if (x < band * 2.0) {
-        c0 = vec3<f32>(1.0, 0.5, 0.0);
-        c1 = vec3<f32>(1.0, 1.0, 0.0);
+        c0 = vec3(1.0, 0.5, 0.0);
+        c1 = vec3(1.0, 1.0, 0.0);
         local = (x - band) / band;
     } else if (x < band * 3.0) {
-        c0 = vec3<f32>(1.0, 1.0, 0.0);
-        c1 = vec3<f32>(0.0, 1.0, 0.0);
+        c0 = vec3(1.0, 1.0, 0.0);
+        c1 = vec3(0.0, 1.0, 0.0);
         local = (x - band * 2.0) / band;
     } else if (x < band * 4.0) {
-        c0 = vec3<f32>(0.0, 1.0, 0.0);
-        c1 = vec3<f32>(0.0, 1.0, 1.0);
+        c0 = vec3(0.0, 1.0, 0.0);
+        c1 = vec3(0.0, 0.0, 1.0);
         local = (x - band * 3.0) / band;
     } else if (x < band * 5.0) {
-        c0 = vec3<f32>(0.0, 1.0, 1.0);
-        c1 = vec3<f32>(0.0, 0.0, 1.0);
+        c0 = vec3(0.0, 0.0, 1.0);
+        c1 = vec3(0.29, 0.0, 0.51);
         local = (x - band * 4.0) / band;
     } else if (x < band * 6.0) {
-        c0 = vec3<f32>(0.0, 0.0, 1.0);
-        c1 = vec3<f32>(0.5, 0.0, 1.0);
+        c0 = vec3(0.29, 0.0, 0.51);
+        c1 = vec3(0.56, 0.0, 1.0);
         local = (x - band * 5.0) / band;
     } else {
-        c0 = vec3<f32>(0.5, 0.0, 1.0);
-        c1 = vec3<f32>(1.0, 0.0, 1.0);
+        c0 = vec3(0.56, 0.0, 1.0);
+        c1 = vec3(0.85, 0.45, 1.0);
         local = (x - band * 6.0) / band;
     }
+    local = smoothstep(0.0, 1.0, local);
     return mix(c0, c1, local);
 }
 
-fn radar_palette(t: f32) -> vec3<f32> {
-    let x = clamp(t, 0.0, 1.0);
-    var m = vec3<f32>(1.0);
-    if (x < 0.25) { m = vec3<f32>(1.0, 0.2, 0.8); }
-    else if (x < 0.5) { m = vec3<f32>(0.8, 1.0, 0.2); }
-    else if (x < 0.75) { m = vec3<f32>(0.2, 0.8, 1.0); }
-    else { m = vec3<f32>(1.0, 0.6, 0.2); }
-    
-    let a = vec3<f32>(0.6, 0.7, 0.75);
-    let b = vec3<f32>(0.4, 0.3, 0.25);
-    let c = vec3<f32>(3.0, 2.0, 1.5);
-    let d = vec3<f32>(0.2, 0.5, 0.8);
-    let col = a + b * cos(6.28318 * (c * x + d));
-    return clamp(m * col, vec3<f32>(0.0), vec3<f32>(1.0));
+fn radar_palette(t_in: f32) -> vec3<f32> {
+    let x = clamp(t_in, 0.0, 1.0);
+    var c0: vec3<f32>;
+    var c1: vec3<f32>;
+    var local: f32;
+    if (x < 0.25) {
+        c0 = vec3(0.05, 0.08, 0.2);
+        c1 = vec3(0.05, 0.25, 0.6);
+        local = x / 0.25;
+    } else if (x < 0.55) {
+        c0 = vec3(0.05, 0.25, 0.6);
+        c1 = vec3(0.0, 0.65, 0.35);
+        local = (x - 0.25) / 0.3;
+    } else if (x < 0.8) {
+        c0 = vec3(0.0, 0.65, 0.35);
+        c1 = vec3(0.85, 0.85, 0.2);
+        local = (x - 0.55) / 0.25;
+    } else {
+        c0 = vec3(0.85, 0.85, 0.2);
+        c1 = vec3(0.95, 0.2, 0.2);
+        local = (x - 0.8) / 0.2;
+    }
+    local = smoothstep(0.0, 1.0, local);
+    return mix(c0, c1, local);
 }
 
-// Approximate view-space depth using distance from the camera in world space.
-// This matches the previous, working behaviour and avoids floor/ceiling disappearing.
 fn view_space_depth(world_pos: vec3<f32>) -> f32 {
-    let cam_pos = view.world_position.xyz;
-    let to_point = world_pos - cam_pos;
-    return length(to_point);
+    let world_pos4 = vec4<f32>(world_pos, 1.0);
+    let view_pos4 = view.view_from_world * world_pos4;
+    let view_pos = view_pos4.xyz;
+    return -view_pos.z;
 }
 
 fn compute_level_w_like(p: vec3<f32>) -> f32 {
@@ -141,15 +150,15 @@ fn fragment(
     density = clamp(density * settings.density_contrast, 0.0, 1.0);
     density = pow(density, settings.density_gamma);
     density = smoothstep(0.0, 1.0, density);
-    
+
     // Base thermal color
     var thermal_col = roygbiv_thermal(density);
     
     // Thermal band layering (Radar field)
     let compression_intensity = clamp((1.0 - settings.compression_factor) / 0.65, 0.0, 1.0);
-    let field_a = fbm(world_pos.xz * 0.08 + vec2<f32>(13.2, -7.4));
-    let field_b = fbm(world_pos.xz * 0.18 + vec2<f32>(-4.7, 9.1));
-    let field_c = fbm(world_pos.xz * 0.35 + vec2<f32>(2.1, -3.6));
+    let field_a = fbm(world_pos.xz * 0.08 + vec2<f32>(13.2, -7.4) + vec2<f32>(settings.time * 0.01, -settings.time * 0.013));
+    let field_b = fbm(world_pos.xz * 0.18 + vec2<f32>(-4.7, 9.1) + vec2<f32>(-settings.time * 0.012, settings.time * 0.009));
+    let field_c = fbm(world_pos.xz * 0.35 + vec2<f32>(2.1, -3.6) + vec2<f32>(settings.time * 0.008, settings.time * 0.007));
     let field = clamp(0.15 + field_a * 0.55 + field_b * 0.28 + field_c * 0.12, 0.0, 1.0);
     let radar_val = clamp(field + compression_intensity * 0.6, 0.0, 1.0);
     
