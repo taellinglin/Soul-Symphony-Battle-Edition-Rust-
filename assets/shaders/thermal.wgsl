@@ -156,9 +156,9 @@ fn fragment(
     
     // Thermal band layering (Radar field)
     let compression_intensity = clamp((1.0 - settings.compression_factor) / 0.65, 0.0, 1.0);
-    let field_a = fbm(world_pos.xz * 0.08 + vec2<f32>(13.2, -7.4) + vec2<f32>(settings.time * 0.01, -settings.time * 0.013));
-    let field_b = fbm(world_pos.xz * 0.18 + vec2<f32>(-4.7, 9.1) + vec2<f32>(-settings.time * 0.012, settings.time * 0.009));
-    let field_c = fbm(world_pos.xz * 0.35 + vec2<f32>(2.1, -3.6) + vec2<f32>(settings.time * 0.008, settings.time * 0.007));
+    let field_a = fbm(world_pos.xz * 0.08 + vec2<f32>(13.2, -7.4));
+    let field_b = fbm(world_pos.xz * 0.18 + vec2<f32>(-4.7, 9.1));
+    let field_c = fbm(world_pos.xz * 0.35 + vec2<f32>(2.1, -3.6));
     let field = clamp(0.15 + field_a * 0.55 + field_b * 0.28 + field_c * 0.12, 0.0, 1.0);
     let radar_val = clamp(field + compression_intensity * 0.6, 0.0, 1.0);
     

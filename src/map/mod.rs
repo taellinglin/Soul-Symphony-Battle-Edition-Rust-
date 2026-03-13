@@ -62,6 +62,18 @@ pub(crate) fn generate_dungeon(
             let half_w = inner_w * 0.5;
             let half_h = inner_h * 0.5;
 
+            fn arena_dimension_field(index: usize) -> DimensionField {
+                let i = index as f32;
+                DimensionField {
+                    base: 0.88 + i * 0.06,
+                    amp: 0.18,
+                    freq: 0.7 + i * 0.2,
+                    phase: i * 1.6,
+                    center_bias: 0.85,
+                    edge_bias: 0.6,
+                }
+            }
+
             let make_room = |x: f32, y: f32, w: f32, h: f32, id: usize| Room {
                 x,
                 y,
@@ -69,7 +81,7 @@ pub(crate) fn generate_dungeon(
                 h,
                 w_layer: 0,
                 _id: id,
-                dimension_field: DimensionField::default(),
+                dimension_field: arena_dimension_field(id),
                 pockets: Vec::new(),
                 doors: RoomDoors::default(),
             };
@@ -732,8 +744,20 @@ pub(crate) fn generate_dungeon(
     }
     }
 
-    graph.rooms = rooms;
-    
+    graph.rooms = rooms.clone();
+
+    if config.layout_mode == "arena" {
+        for room in &graph.rooms {
+            let cx = room.x + room.w * 0.5;
+            let cz = room.y + room.h * 0.5;
+            commands.spawn((
+                Transform::from_xyz(cx, 0.0, cz).with_scale(Vec3::new(room.w, 1.0, room.h)),
+                room.dimension_field,
+                room.clone(),
+            ));
+        }
+    }
+
     // Python parity: _build_floor_and_bounds creates a map-wide transparent water surface
     // at floor_y + water_surface_raise = 0.28, covering the entire map (map_w x map_d)
     // This is the surface that produces the vibrant ROYGBIV thermal color floor patterns

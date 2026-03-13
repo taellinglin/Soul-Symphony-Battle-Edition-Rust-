@@ -100,7 +100,10 @@ pub fn update_floor_wetness(
 }
 
 pub fn sync_material_uniforms(
-    player_query: Query<&crate::components::Spatial4D, With<crate::player::Player>>,
+    player_query: Query<
+        (&crate::components::Spatial4D, &crate::components::CompressionState),
+        With<crate::player::Player>,
+    >,
     mut hyper_slice_materials: ResMut<Assets<HyperSliceMaterial>>,
     mut floor_materials: ResMut<Assets<crate::rendering::thermal::ThermalMaterial>>,
     mut water_materials: ResMut<Assets<WaterSurfaceMaterial>>,
@@ -108,13 +111,13 @@ pub fn sync_material_uniforms(
     mut ball_materials: ResMut<Assets<BallMaterial>>,
     mut boss_materials: ResMut<Assets<BossHyperMaterial>>,
     time: Res<Time>,
-    // Per-entity W-layer syncing
     spatial_query: Query<&crate::components::Spatial4D>,
     material_query: Query<(Entity, &Handle<HyperSliceMaterial>, Option<&Parent>)>,
 ) {
-    if let Ok(player_spatial) = player_query.get_single() {
+    if let Ok((player_spatial, comp_state)) = player_query.get_single() {
         let t = time.elapsed_seconds();
         let w = player_spatial.w;
+        let compression_factor = comp_state.factor_smoothed;
 
         // 1. Sync per-entity object_w (Monsters, Projectiles, etc.)
         for (entity, handle, parent) in material_query.iter() {
@@ -140,10 +143,12 @@ pub fn sync_material_uniforms(
         }
         for (_, mat) in floor_materials.iter_mut() {
             mat.extension.settings.time = t;
+            mat.extension.settings.compression_factor = compression_factor;
         }
         for (_, mat) in water_materials.iter_mut() {
             mat.extension.settings.player_w = w;
             mat.extension.settings.time = t;
+            mat.extension.settings.compression_factor = compression_factor;
         }
         for (_, mat) in ceiling_materials.iter_mut() {
             mat.extension.settings.player_w = w;
