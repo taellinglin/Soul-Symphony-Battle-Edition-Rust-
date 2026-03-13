@@ -23,7 +23,7 @@ fn spawn_gravity_fields(
     mut effects: ResMut<Assets<EffectAsset>>,
     rooms_query: Query<(Entity, &crate::map::Room), Added<crate::map::Room>>,
 ) {
-    for (entity, room) in rooms_query.iter() {
+    for (_entity, room) in rooms_query.iter() {
         let _size = Vec3::new(room.w, 15.0, room.h);
         
         let mut color_gradient = Gradient::new();
@@ -53,7 +53,6 @@ fn spawn_gravity_fields(
             attribute: Attribute::LIFETIME,
             value: writer.lit(8.0).expr(),
         };
-        // Fix for "missing Attribute::VELOCITY" warning
         let init_velocity = SetAttributeModifier {
             attribute: Attribute::VELOCITY,
             value: writer.lit(Vec3::ZERO).expr(),
@@ -78,15 +77,16 @@ fn spawn_gravity_fields(
 
         let effect_handle = effects.add(effect);
 
-        commands.entity(entity).with_children(|parent| {
-            parent.spawn((
-                ParticleEffectBundle {
-                    effect: ParticleEffect::new(effect_handle),
-                    ..default()
-                },
-                GravityFieldEmitter,
-            ));
-        });
+        let center = Vec3::new(room.x + room.w * 0.5, 0.0, room.y + room.h * 0.5);
+
+        commands.spawn((
+            ParticleEffectBundle {
+                effect: ParticleEffect::new(effect_handle),
+                transform: Transform::from_translation(center),
+                ..default()
+            },
+            GravityFieldEmitter,
+        ));
     }
 }
 
@@ -111,7 +111,6 @@ fn spawn_background_stars(
             attribute: Attribute::LIFETIME,
             value: writer.lit(100.0).expr(), // Long lifetime for stars
         };
-        // Fix for "missing Attribute::VELOCITY" warning
         let init_velocity = SetAttributeModifier {
             attribute: Attribute::VELOCITY,
             value: writer.lit(Vec3::ZERO).expr(),
