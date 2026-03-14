@@ -1,224 +1,26 @@
-#![allow(dead_code, unused_imports)] // unused_imports: Core3d, Node3d, ViewNodeRunner, RenderGraphApp when CRT node is disabled
-pub mod particles;
 pub mod audio;
+pub mod particles;
 pub mod viscous;
-pub mod trails;
 
-use bevy::{
-    prelude::*,
-    core_pipeline::{core_3d::graph::{Core3d, Node3d}, fullscreen_vertex_shader::fullscreen_shader_vertex_state},
-    ecs::query::QueryItem,
-    render::{
-        extract_component::{ComponentUniforms, ExtractComponent, ExtractComponentPlugin, UniformComponentPlugin},
-        render_graph::{NodeRunError, RenderGraphApp, RenderGraphContext, ViewNode, ViewNodeRunner, RenderLabel},
-        render_resource::{binding_types::{sampler, texture_2d, uniform_buffer}, *},
-        renderer::{RenderContext, RenderDevice},
-        view::{ViewTarget, RenderLayers},
-        RenderApp,
-    },
-};
-
+use bevy::{prelude::*, render::view::RenderLayers};
 
 pub struct FxPlugin;
 
 impl Plugin for FxPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            ExtractComponentPlugin::<CrtSettings>::default(),
-            UniformComponentPlugin::<CrtSettings>::default(),
             particles::FxParticlesPlugin,
             audio::InternalAudioPlugin,
             viscous::ViscousDistortPlugin,
-            trails::TrailPlugin,
         ));
 
         app.add_event::<FloatingTextEvent>();
 
-        app.add_systems(Update, (
-            update_crt_settings,
-            floating_text_system,
-            spawn_floating_text_handler,
-        ));
-
-        // Parity-original-first: original has no CRT effect (only viscous_distort). CRT disabled.
-        // let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-        //     return;
-        // };
-        // render_app
-        //     .add_render_graph_node::<ViewNodeRunner<CrtNode>>(Core3d, CrtLabel)
-        //     .add_render_graph_edges(
-        //         Core3d,
-        //         (
-        //             Node3d::Tonemapping,
-        //             CrtLabel,
-        //             Node3d::EndMainPassPostProcessing,
-        //         ),
-        //     );
+        app.add_systems(Update, (floating_text_system, spawn_floating_text_handler));
     }
 
     fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        render_app.init_resource::<CrtPipeline>();
-    }
-}
-
-// ----------------------------------------------------------------------------
-// 1. Post Processing Pipeline (CRT)
-// ----------------------------------------------------------------------------
-
-#[derive(Component, Clone, Copy, ExtractComponent, ShaderType)]
-pub struct CrtSettings {
-    pub intensity: f32,
-    pub aberration_offset: f32,
-    pub time: f32,
-    pub warp_strength: f32,
-}
-
-impl Default for CrtSettings {
-    fn default() -> Self {
-        Self {
-            intensity: 1.0,
-            aberration_offset: 0.0,
-            time: 0.0,
-            warp_strength: 0.0,
-        }
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct CrtLabel;
-
-#[derive(Default)]
-pub struct CrtNode;
-
-impl ViewNode for CrtNode {
-    type ViewQuery = (
-        &'static ViewTarget,
-        &'static CrtSettings,
-    );
-
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        (view_target, _crt_settings): QueryItem<Self::ViewQuery>,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
-        let crt_pipeline = world.resource::<CrtPipeline>();
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let Some(pipeline) = pipeline_cache.get_render_pipeline(crt_pipeline.pipeline_id) else {
-            return Ok(());
-        };
-
-        let settings_uniforms = world.resource::<ComponentUniforms<CrtSettings>>();
-        let Some(settings_binding) = settings_uniforms.uniforms().binding() else {
-            return Ok(());
-        };
-
-        let post_process = view_target.post_process_write();
-
-        let bind_group = render_context.render_device().create_bind_group(
-            "crt_bind_group",
-            &crt_pipeline.layout,
-            &BindGroupEntries::sequential((
-                post_process.source,
-                &crt_pipeline.sampler,
-                settings_binding,
-            )),
-        );
-
-        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-            label: Some("crt_pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: post_process.destination,
-                resolve_target: None,
-                ops: Operations::default(),
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        render_pass.set_render_pipeline(pipeline);
-        render_pass.set_bind_group(0, &bind_group, &[]);
-        render_pass.draw(0..3, 0..1);
-
-        Ok(())
-    }
-}
-
-#[derive(Resource)]
-pub struct CrtPipeline {
-    layout: BindGroupLayout,
-    sampler: Sampler,
-    pipeline_id: CachedRenderPipelineId,
-}
-
-impl FromWorld for CrtPipeline {
-    fn from_world(world: &mut World) -> Self {
-        let render_device = world.resource::<RenderDevice>();
-
-        let layout = render_device.create_bind_group_layout(
-            "crt_bind_group_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::FRAGMENT,
-                (
-                    texture_2d(TextureSampleType::Float { filterable: true }),
-                    sampler(SamplerBindingType::Filtering),
-                    uniform_buffer::<CrtSettings>(false),
-                ),
-            ),
-        );
-
-        let sampler = render_device.create_sampler(&SamplerDescriptor::default());
-        let shader = world.resource::<AssetServer>().load("shaders/crt_post_process.wgsl");
-
-        let pipeline_id = world.resource_mut::<PipelineCache>().queue_render_pipeline(
-            RenderPipelineDescriptor {
-                label: Some("crt_pipeline".into()),
-                layout: vec![layout.clone()],
-                vertex: fullscreen_shader_vertex_state(),
-                fragment: Some(FragmentState {
-                    shader,
-                    shader_defs: vec![],
-                    entry_point: "fragment".into(),
-                    targets: vec![Some(ColorTargetState {
-                        format: TextureFormat::Rgba16Float, // Bevy HDR default
-                        blend: None,
-                        write_mask: ColorWrites::ALL,
-                    })],
-                }),
-                primitive: PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: MultisampleState::default(),
-                push_constant_ranges: vec![],
-            },
-        );
-
-        Self {
-            layout,
-            sampler,
-            pipeline_id,
-        }
-    }
-}
-
-// ----------------------------------------------------------------------------
-// 2. Transiet Visual Effects System (4D Ripples)
-// ----------------------------------------------------------------------------
-
-
-fn update_crt_settings(
-    mut query: Query<&mut CrtSettings>,
-    time: Res<Time>,
-) {
-    for mut settings in query.iter_mut() {
-        settings.time = time.elapsed_seconds();
-        // Warp strength could be linked to player velocity or game state
-        // For now, let's keep it at 1.0 if intensity is up
-        settings.warp_strength = settings.intensity;
+        let _ = app;
     }
 }
 
@@ -265,7 +67,8 @@ fn spawn_floating_text_handler(
                         font_size: 60.0,
                         color: event.color,
                     },
-                ).with_justify(JustifyText::Center),
+                )
+                .with_justify(JustifyText::Center),
                 transform: Transform::from_translation(event.pos)
                     .with_scale(Vec3::splat(event.scale * 0.01)),
                 ..default()

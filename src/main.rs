@@ -1,38 +1,45 @@
-use bevy::prelude::*;
-use bevy::pbr::FogSettings;
 use bevy::core_pipeline::bloom::BloomSettings;
+use bevy::pbr::FogSettings;
+use bevy::prelude::*;
+use bevy::window::CursorGrabMode;
 use bevy_hanabi::prelude::*;
 use bevy_rapier3d::prelude::*;
-use bevy::window::CursorGrabMode;
 
-mod components;
-mod map;
-mod rendering;
-mod player;
 mod ai;
+mod components;
 mod effects;
-mod ui;
-mod world;
+mod map;
+mod player;
+mod rendering;
 mod systems;
+mod ui;
 mod weapon_system;
+mod world;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()).set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Soul Symphony (Battle Edition)".into(),
-                resolution: bevy::window::WindowResolution::new(1920.0, 1080.0),
-                present_mode: bevy::window::PresentMode::AutoVsync,
-                ..default()
-            }),
-            ..default()
-        }).set(bevy::render::RenderPlugin {
-            render_creation: bevy::render::settings::RenderCreation::Automatic(bevy::render::settings::WgpuSettings {
-                backends: Some(bevy::render::settings::Backends::VULKAN),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Soul Symphony (Battle Edition)".into(),
+                        resolution: bevy::window::WindowResolution::new(1920.0, 1080.0),
+                        present_mode: bevy::window::PresentMode::AutoVsync,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(bevy::render::RenderPlugin {
+                    render_creation: bevy::render::settings::RenderCreation::Automatic(
+                        bevy::render::settings::WgpuSettings {
+                            backends: Some(bevy::render::settings::Backends::VULKAN),
+                            ..default()
+                        },
+                    ),
+                    ..default()
+                }),
+        )
         .add_plugins(HanabiPlugin)
         .add_plugins(rendering::RenderingPlugin)
         .add_plugins(map::DungeonGeneratorPlugin)
@@ -45,31 +52,10 @@ fn main() {
         .add_plugins(world::WorldPlugin)
         .add_plugins(systems::SystemsPlugin)
         .add_systems(PreStartup, (setup_camera_light, cursor_grab_system))
-        .add_systems(Update, auto_screenshot)
         .run();
 }
 
-fn auto_screenshot(
-    mut timer: Local<f32>,
-    time: Res<Time>,
-    main_window: Query<Entity, With<Window>>,
-    mut screenshot_manager: ResMut<bevy::render::view::screenshot::ScreenshotManager>,
-    mut done: Local<bool>,
-) {
-    if *done { return; }
-    *timer += time.delta_seconds();
-    // Some Linux/NVIDIA setups close the window early; grab a reference frame quickly.
-    if *timer > 3.5 {
-        if let Ok(window_entity) = main_window.get_single() {
-            let _ = screenshot_manager.save_screenshot_to_disk(window_entity, "/tmp/original_screen.png");
-            *done = true;
-        }
-    }
-}
-
-fn cursor_grab_system(
-    mut windows: Query<&mut Window>,
-) {
+fn cursor_grab_system(mut windows: Query<&mut Window>) {
     for mut window in windows.iter_mut() {
         window.cursor.grab_mode = CursorGrabMode::Locked;
         window.cursor.visible = false;
@@ -96,19 +82,26 @@ fn setup_camera_light(
                 ..default()
             },
             // Panda3D HPR (18, -62, 0) -> Bevy: pitch=-62, yaw=18
-            transform: Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, 18.0_f32.to_radians(), -62.0_f32.to_radians(), 0.0)),
+            transform: Transform::from_rotation(Quat::from_euler(
+                EulerRot::YXZ,
+                18.0_f32.to_radians(),
+                -62.0_f32.to_radians(),
+                0.0,
+            )),
             ..default()
         },
-        bevy::render::view::RenderLayers::from_layers(&[0, 2]),
+        bevy::render::view::RenderLayers::layer(0),
     ));
 
-    // Main Camera (Layer 0 - World + Distortion)
+    // Main Camera (Layer 0 — world, player, weapon; full-screen viscous distortion for parity)
     commands.spawn((
         Camera3dBundle {
             camera: Camera {
                 hdr: true,
                 order: 0,
-                clear_color: bevy::render::camera::ClearColorConfig::Custom(Color::srgb(0.03, 0.04, 0.06)),
+                clear_color: bevy::render::camera::ClearColorConfig::Custom(Color::srgb(
+                    0.03, 0.04, 0.06,
+                )),
                 ..default()
             },
             projection: Projection::Perspective(PerspectiveProjection {
@@ -117,16 +110,19 @@ fn setup_camera_light(
                 far: 1500.0,
                 ..default()
             }),
-            transform: Transform::from_xyz(0.0, 2.35, 6.8).looking_at(Vec3::new(0.0, 0.32, 0.0), Vec3::Y),
+            transform: Transform::from_xyz(0.0, 2.35, 6.8)
+                .looking_at(Vec3::new(0.0, 0.32, 0.0), Vec3::Y),
             ..default()
         },
         player::PlayerCamera,
-        effects::CrtSettings::default(),
         effects::viscous::ViscousSettings::default(),
         // Python parity (main.py _setup_camera): black fog from 0.0 to 35.0
         FogSettings {
             color: Color::BLACK,
-            falloff: FogFalloff::Linear { start: 0.0, end: 35.0 },
+            falloff: FogFalloff::Linear {
+                start: 0.0,
+                end: 35.0,
+            },
             ..default()
         },
         BloomSettings {
@@ -138,42 +134,6 @@ fn setup_camera_light(
             ..default()
         },
         bevy::render::view::RenderLayers::layer(0),
-    ));
-
-    // Foreground Camera (Layer 2 - Player/Weapon, NO DISTORTION)
-    commands.spawn((
-        Camera3dBundle {
-            camera: Camera {
-                hdr: true,
-                order: 2, // Drawn after main scene (0) and world-distort
-                clear_color: bevy::render::camera::ClearColorConfig::None,
-                ..default()
-            },
-            projection: Projection::Perspective(PerspectiveProjection {
-                fov: 75.0_f32.to_radians(),
-                near: 0.05, // Closer near plane for weapon transparency
-                far: 2000.0,
-                ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 2.35, 6.8).looking_at(Vec3::new(0.0, 0.32, 0.0), Vec3::Y),
-            ..default()
-        },
-        player::ForegroundCamera,
-        // MUST have same fog as main camera to blend correctly
-        FogSettings {
-            color: Color::BLACK,
-            falloff: FogFalloff::Linear { start: 0.0, end: 35.0 },
-            ..default()
-        },
-        BloomSettings {
-            intensity: 0.35,
-            prefilter_settings: bevy::core_pipeline::bloom::BloomPrefilterSettings {
-                threshold: 0.52,
-                threshold_softness: 0.2,
-            },
-            ..default()
-        },
-        bevy::render::view::RenderLayers::layer(2),
     ));
 
     // Floating Text Camera (Layer 1 - UI overlays)
@@ -190,7 +150,8 @@ fn setup_camera_light(
                 far: 1500.0,
                 ..default()
             }),
-            transform: Transform::from_xyz(0.0, 2.35, 6.8).looking_at(Vec3::new(0.0, 0.32, 0.0), Vec3::Y),
+            transform: Transform::from_xyz(0.0, 2.35, 6.8)
+                .looking_at(Vec3::new(0.0, 0.32, 0.0), Vec3::Y),
             ..default()
         },
         player::FloatingTextCamera,
@@ -209,7 +170,9 @@ fn setup_camera_light(
             size,
             dimension: bevy::render::render_resource::TextureDimension::D2,
             format: bevy::render::render_resource::TextureFormat::Bgra8UnormSrgb,
-            usage: bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING | bevy::render::render_resource::TextureUsages::COPY_DST,
+            usage: bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT
+                | bevy::render::render_resource::TextureUsages::TEXTURE_BINDING
+                | bevy::render::render_resource::TextureUsages::COPY_DST,
             view_formats: &[],
             mip_level_count: 1,
             sample_count: 1,
@@ -218,7 +181,9 @@ fn setup_camera_light(
     };
     image.resize(size);
     let reflection_image_handle = images.add(image);
-    commands.insert_resource(rendering::ReflectionTexture(reflection_image_handle.clone()));
+    commands.insert_resource(rendering::ReflectionTexture(
+        reflection_image_handle.clone(),
+    ));
 
     // Inverted Echo Camera (Low-quality mirrored reflection camera)
     commands.spawn((
@@ -226,7 +191,9 @@ fn setup_camera_light(
             camera: Camera {
                 order: -1, // Render before main camera
                 target: bevy::render::camera::RenderTarget::Image(reflection_image_handle),
-                clear_color: bevy::render::camera::ClearColorConfig::Custom(Color::srgb(0.05, 0.06, 0.08)),
+                clear_color: bevy::render::camera::ClearColorConfig::Custom(Color::srgb(
+                    0.05, 0.06, 0.08,
+                )),
                 ..default()
             },
             projection: Projection::Perspective(PerspectiveProjection {
@@ -243,5 +210,4 @@ fn setup_camera_light(
         // Draw standard world layer (0), but NOT floating text (1)
         bevy::render::view::RenderLayers::layer(0),
     ));
-
 }

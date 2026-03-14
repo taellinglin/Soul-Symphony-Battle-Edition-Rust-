@@ -10,7 +10,6 @@ pub struct Weapon {
     pub anchor_pos: Vec3,
     pub weapon_forward: Vec3,
     pub prev_tip_pos: Option<Vec3>,
-    pub slash_timer: f32,
     pub echo_timer: f32,
     pub echo_cycle: u32,
 }
@@ -26,7 +25,6 @@ impl Default for Weapon {
             anchor_pos: Vec3::ZERO,
             weapon_forward: Vec3::Z,
             prev_tip_pos: None,
-            slash_timer: 0.0,
             echo_timer: 0.0,
             echo_cycle: 0,
         }
@@ -36,8 +34,6 @@ impl Default for Weapon {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WeaponState {
     Idle,
-    #[allow(dead_code)]
-    Swing,
     Spin,
     Throw,
     Hyperbomb,
@@ -86,7 +82,6 @@ pub struct MagicMissile {
 // side  = max(0.22, 0.22 * min(1.25, sword_scale)) = 0.275
 // reach = max(1.8,  1.8  * sword_scale)             = 3.06
 pub(crate) const SWORD_SCALE: f32 = 1.7;
-pub(crate) const SWORD_GEO_SCALE: f32 = 1.7; // Geometry scale for sword mesh parts
 pub(crate) const UP_OFFSET: f32 = 0.84;
 pub(crate) const FWD_OFFSET: f32 = 0.578;
 pub(crate) const SIDE_OFFSET: f32 = 0.275;

@@ -1,16 +1,26 @@
+use crate::components::CompressionState;
+use crate::player::Player;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::Velocity;
-use crate::player::Player;
-use crate::components::CompressionState;
+
+type AudioQueryResult = (&'static mut Transform, &'static mut AudioSink);
 
 pub struct InternalAudioPlugin;
 
 impl Plugin for InternalAudioPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<PlaySfxEvent>()
-           .init_resource::<ActiveBgm>()
-           .add_systems(Startup, load_audio_assets)
-           .add_systems(Update, (handle_sfx_events, manage_player_roll_sound, manage_timespace_tone, manage_bgm));
+            .init_resource::<ActiveBgm>()
+            .add_systems(Startup, load_audio_assets)
+            .add_systems(
+                Update,
+                (
+                    handle_sfx_events,
+                    manage_player_roll_sound,
+                    manage_timespace_tone,
+                    manage_bgm,
+                ),
+            );
     }
 }
 
@@ -54,7 +64,7 @@ pub struct GameAudioAssets {
 }
 
 fn load_audio_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
-    // In Bevy, missing assets will just print a warning and not crash, 
+    // In Bevy, missing assets will just print a warning and not crash,
     // which helps if actual files are missing during parity porting.
     let assets = GameAudioAssets {
         hit: asset_server.load("soundfx/monsterhit.wav"),
@@ -65,8 +75,8 @@ fn load_audio_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
         heal: asset_server.load("soundfx/pickuphealth.wav"),
         monster_hit: asset_server.load("soundfx/monsterhit.wav"),
         monster_die: asset_server.load("soundfx/monsterdie.wav"),
-        level_up: asset_server.load("soundfx/levelup_/level_up_01.wav"), 
-        roll: asset_server.load("soundfx/water.wav"), 
+        level_up: asset_server.load("soundfx/levelup_/level_up_01.wav"),
+        roll: asset_server.load("soundfx/water.wav"),
         bgm_exploration: asset_server.load("bgm/Soundtrack.mp3"),
         bgm_boss: asset_server.load("bgm/Boss.mp3"),
         timespace_tone: asset_server.load("soundfx/timespace_sine_v2.wav"),
@@ -93,20 +103,20 @@ fn handle_sfx_events(
             SfxKind::LevelUp => assets.level_up.clone(),
         };
 
-        let mut ent = commands.spawn((
-            AudioSourceBundle {
-                source,
-                settings: PlaybackSettings {
-                    volume: bevy::audio::Volume::new(ev.volume),
-                    speed: ev.pitch,
-                    mode: bevy::audio::PlaybackMode::Despawn,
-                    ..default()
-                },
+        let mut ent = commands.spawn((AudioSourceBundle {
+            source,
+            settings: PlaybackSettings {
+                volume: bevy::audio::Volume::new(ev.volume),
+                speed: ev.pitch,
+                mode: bevy::audio::PlaybackMode::Despawn,
+                ..default()
             },
-        ));
+        },));
 
         if let Some(pos) = ev.position {
-            ent.insert(TransformBundle::from_transform(Transform::from_translation(pos)));
+            ent.insert(TransformBundle::from_transform(
+                Transform::from_translation(pos),
+            ));
         }
     }
 }
@@ -118,14 +128,20 @@ pub struct PlayerRollSound;
 fn manage_player_roll_sound(
     mut commands: Commands,
     player_query: Query<(&Transform, &Velocity), With<Player>>,
-    mut sound_query: Query<(&mut Transform, &mut AudioSink), (With<PlayerRollSound>, Without<Player>)>,
+    mut sound_query: Query<AudioQueryResult, (With<PlayerRollSound>, Without<Player>)>,
     assets: Option<Res<GameAudioAssets>>,
 ) {
-    let Ok((player_tf, player_vel)) = player_query.get_single() else { return };
+    let Ok((player_tf, player_vel)) = player_query.get_single() else {
+        return;
+    };
     let Some(assets) = assets else { return };
 
     let speed = player_vel.linvel.length();
-    let target_volume = if speed > 1.0 { (speed / 15.0).clamp(0.0, 0.8) } else { 0.0 };
+    let target_volume = if speed > 1.0 {
+        (speed / 15.0).clamp(0.0, 0.8)
+    } else {
+        0.0
+    };
     let target_pitch = 0.8 + (speed / 20.0).clamp(0.0, 1.2);
 
     if sound_query.is_empty() {
@@ -160,18 +176,20 @@ pub struct TimespaceToneSound;
 fn manage_timespace_tone(
     mut commands: Commands,
     player_query: Query<(&Transform, &CompressionState), With<Player>>,
-    mut sound_query: Query<(&mut Transform, &mut AudioSink), (With<TimespaceToneSound>, Without<Player>)>,
+    mut sound_query: Query<AudioQueryResult, (With<TimespaceToneSound>, Without<Player>)>,
     assets: Option<Res<GameAudioAssets>>,
 ) {
-    let Ok((player_tf, comp_state)) = player_query.get_single() else { return };
+    let Ok((player_tf, comp_state)) = player_query.get_single() else {
+        return;
+    };
     let Some(assets) = assets else { return };
 
     let factor = comp_state.factor_smoothed;
-    
+
     // Deviation from 1.0 (normal space) increases volume
     let deviation = (factor - 1.0).abs();
     let target_volume = (deviation * 1.5).clamp(0.0, 0.45);
-    
+
     // Pitch maps to density: compression (<1.0) = lower pitch, dilation (>1.0) = higher pitch
     let target_pitch = factor.clamp(0.2, 3.0);
 
@@ -226,16 +244,20 @@ fn manage_bgm(
     bgm_query: Query<(Entity, &AudioSink), With<MainBgm>>,
 ) {
     let Some(assets) = assets else { return };
-    
-    let is_boss = boss_state.map_or(false, |s| s.is_active);
-    let target_type = if is_boss { BgmType::Boss } else { BgmType::Exploration };
+
+    let is_boss = boss_state.is_some_and(|s| s.is_active);
+    let target_type = if is_boss {
+        BgmType::Boss
+    } else {
+        BgmType::Exploration
+    };
 
     if active_bgm.0 != target_type {
         // Stop current
         for (entity, _) in bgm_query.iter() {
             commands.entity(entity).despawn_recursive();
         }
-        
+
         // Start new
         let source = if target_type == BgmType::Boss {
             assets.bgm_boss.clone()
@@ -254,7 +276,7 @@ fn manage_bgm(
                 },
             },
         ));
-        
+
         active_bgm.0 = target_type;
     }
 }

@@ -1,18 +1,17 @@
-#![allow(dead_code)]
-use bevy::prelude::*;
-use std::collections::{BinaryHeap, HashMap};
-use std::cmp::Ordering;
-use crate::map::DungeonGraph;
 use crate::components::Spatial4D;
+use crate::map::DungeonGraph;
 use crate::player::Player;
-use crate::rendering::{HyperSliceMaterial, HyperSliceSettings, HyperSliceExtension};
+use crate::rendering::{HyperSliceExtension, HyperSliceMaterial, HyperSliceSettings};
+use bevy::prelude::*;
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
 
 pub struct NavigationPlugin;
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PathfindingState>()
-           .add_systems(Update, (calculate_path, update_visual_trail).chain());
+            .add_systems(Update, (calculate_path, update_visual_trail).chain());
     }
 }
 
@@ -38,7 +37,10 @@ impl Eq for AStarNode {}
 
 impl Ord for AStarNode {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.f_cost.partial_cmp(&self.f_cost).unwrap_or(Ordering::Equal)
+        other
+            .f_cost
+            .partial_cmp(&self.f_cost)
+            .unwrap_or(Ordering::Equal)
     }
 }
 
@@ -55,10 +57,13 @@ fn calculate_path(
     player_query: Query<(&Transform, &Spatial4D), With<Player>>,
     goal_query: Query<(&Transform, &Spatial4D), With<Goal>>,
 ) {
-    if graph.rooms.is_empty() { return; }
+    if graph.rooms.is_empty() {
+        return;
+    }
 
     state.recalculation_timer.tick(time.delta());
-    if !state.recalculation_timer.just_finished() && !state.recalculation_timer.duration().is_zero() {
+    if !state.recalculation_timer.just_finished() && !state.recalculation_timer.duration().is_zero()
+    {
         return;
     }
     state.recalculation_timer = Timer::from_seconds(1.2, TimerMode::Repeating); // Throttled update
@@ -99,7 +104,10 @@ fn calculate_path(
             let mut came_from: HashMap<usize, usize> = HashMap::new();
 
             g_score.insert(start_idx, 0.0);
-            open_set.push(AStarNode { index: start_idx, f_cost: 0.0 });
+            open_set.push(AStarNode {
+                index: start_idx,
+                f_cost: 0.0,
+            });
 
             while let Some(current) = open_set.pop() {
                 if current.index == end_idx {
@@ -107,8 +115,15 @@ fn calculate_path(
                     let mut curr = current.index;
                     while curr != start_idx {
                         let room = &graph.rooms[curr];
-                        path.push((Vec3::new(room.center().x, 0.0, room.center().y), (room.w_layer as f32) * 5.0));
-                        if let Some(&prev) = came_from.get(&curr) { curr = prev; } else { break; }
+                        path.push((
+                            Vec3::new(room.center().x, 0.0, room.center().y),
+                            (room.w_layer as f32) * 5.0,
+                        ));
+                        if let Some(&prev) = came_from.get(&curr) {
+                            curr = prev;
+                        } else {
+                            break;
+                        }
                     }
                     path.reverse();
                     state.current_path = path;
@@ -117,19 +132,35 @@ fn calculate_path(
 
                 let current_score = *g_score.get(&current.index).unwrap_or(&f32::MAX);
                 for &(a, b) in &graph.edges {
-                    let n_idx = if a == current.index { b } else if b == current.index { a } else { continue };
-                    
+                    let n_idx = if a == current.index {
+                        b
+                    } else if b == current.index {
+                        a
+                    } else {
+                        continue;
+                    };
+
                     let neighbor = &graph.rooms[n_idx];
                     let current_room = &graph.rooms[current.index];
-                    let dist = Vec3::new(current_room.center().x, 0.0, current_room.center().y).distance(Vec3::new(neighbor.center().x, 0.0, neighbor.center().y))
-                             + ((neighbor.w_layer - current_room.w_layer) as f32).abs() * 5.0;
+                    let dist = Vec3::new(current_room.center().x, 0.0, current_room.center().y)
+                        .distance(Vec3::new(neighbor.center().x, 0.0, neighbor.center().y))
+                        + ((neighbor.w_layer - current_room.w_layer) as f32).abs() * 5.0;
 
                     let tentative_g = current_score + dist;
                     if tentative_g < *g_score.get(&n_idx).unwrap_or(&f32::MAX) {
                         came_from.insert(n_idx, current.index);
                         g_score.insert(n_idx, tentative_g);
-                        let h = Vec3::new(neighbor.center().x, 0.0, neighbor.center().y).distance(Vec3::new(graph.rooms[end_idx].center().x, 0.0, graph.rooms[end_idx].center().y));
-                        open_set.push(AStarNode { index: n_idx, f_cost: tentative_g + h });
+                        let h = Vec3::new(neighbor.center().x, 0.0, neighbor.center().y).distance(
+                            Vec3::new(
+                                graph.rooms[end_idx].center().x,
+                                0.0,
+                                graph.rooms[end_idx].center().y,
+                            ),
+                        );
+                        open_set.push(AStarNode {
+                            index: n_idx,
+                            f_cost: tentative_g + h,
+                        });
                     }
                 }
             }
@@ -153,7 +184,10 @@ fn update_visual_trail(
             commands.spawn((
                 NavWaypoint,
                 Spatial4D {
-                    w: *w, target_w: *w, layer: (*w / 5.0).round() as i32, is_folded: false
+                    w: *w,
+                    target_w: *w,
+                    layer: (*w / 5.0).round() as i32,
+                    is_folded: false,
                 },
                 MaterialMeshBundle {
                     mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),

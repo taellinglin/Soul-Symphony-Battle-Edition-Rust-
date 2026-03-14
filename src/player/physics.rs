@@ -1,49 +1,83 @@
+use crate::components::{CompressionState, Spatial4D};
+use crate::weapon_system::{Weapon, WeaponState};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use crate::components::{Spatial4D, CompressionState};
-use crate::weapon_system::{Weapon, WeaponState};
 
 use super::components::*;
 
-pub(crate) fn player_physics_controller(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mouse_input: Res<ButtonInput<MouseButton>>,
-    gravity: Res<GravityDirection>,
-    hyper: Res<HyperspaceState>,
-    mut jump_state: ResMut<JumpState>,
-    mut timers: ResMut<PhysicsTimers>,
-    camera_query: Query<&Transform, (With<PlayerCamera>, Without<Player>)>,
-    mut query: Query<(&mut ExternalForce, &mut ExternalImpulse, &mut Velocity, &Spatial4D, &Transform, &mut Damping), With<Player>>,
-    mut weapon_query: Query<&mut Weapon>,
-    mut sfx_events: EventWriter<crate::effects::audio::PlaySfxEvent>,
-    mut stats_query: Query<&mut PlayerStats, With<Player>>,
-    time: Res<Time>,
-) {
-    let Ok(mut stats) = stats_query.get_single_mut() else { return };
-    let Ok(cam_tf) = camera_query.get_single() else { return };
-    let dt = time.delta_seconds();
-    timers.roll_time += dt;
+type PlayerPhysicsQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut ExternalForce,
+        &'static mut ExternalImpulse,
+        &'static mut Velocity,
+        &'static Spatial4D,
+        &'static Transform,
+        &'static mut Damping,
+    ),
+    With<Player>,
+>;
 
-    // Tick down cooldowns (original: game loop lines 16314-16319)
-    jump_state.hit_cooldown = (jump_state.hit_cooldown - dt).max(0.0);
-    jump_state.attack_cooldown = (jump_state.attack_cooldown - dt).max(0.0);
-    jump_state.player_damage_cooldown = (jump_state.player_damage_cooldown - dt).max(0.0);
-    timers.monster_contact_sfx_cooldown = (timers.monster_contact_sfx_cooldown - dt).max(0.0);
-    timers.warp_cooldown = (timers.warp_cooldown - dt).max(0.0);
-    jump_state.jump_float_timer = (jump_state.jump_float_timer - dt).max(0.0);
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct PlayerPhysicsParams<'w, 's> {
+    keyboard_input: Res<'w, ButtonInput<KeyCode>>,
+    mouse_input: Res<'w, ButtonInput<MouseButton>>,
+    gravity: Res<'w, GravityDirection>,
+    hyper: Res<'w, HyperspaceState>,
+    jump_state: ResMut<'w, JumpState>,
+    timers: ResMut<'w, PhysicsTimers>,
+    camera_query: Query<'w, 's, &'static Transform, (With<PlayerCamera>, Without<Player>)>,
+    query: PlayerPhysicsQuery<'w, 's>,
+    weapon_query: Query<'w, 's, &'static mut Weapon>,
+    sfx_events: EventWriter<'w, crate::effects::audio::PlaySfxEvent>,
+    stats_query: Query<'w, 's, &'static mut PlayerStats, With<Player>>,
+    time: Res<'w, Time>,
+}
 
-    for (mut ext_force, mut ext_impulse, mut rb_vel, spatial, player_tf, mut damping) in query.iter_mut() {
-        // Friction/Damping (original lines 16482-16483)
-        damping.linear_damping = if hyper.gravity_hold { hyper.ball_friction_shift } else { hyper.ball_friction_default };
+pub(crate) fn player_physics_controller(mut params: PlayerPhysicsParams) {
+    let Ok(mut stats) = params.stats_query.get_single_mut() else {
+        return;
+    };
+    let Ok(cam_tf) = params.camera_query.get_single() else {
+        return;
+    };
+    let dt = params.time.delta_seconds();
+    params.timers.roll_time += dt;
 
-        let input_up = -gravity.0.normalize_or_zero();
+    params.jump_state.hit_cooldown = (params.jump_state.hit_cooldown - dt).max(0.0);
+    params.jump_state.attack_cooldown = (params.jump_state.attack_cooldown - dt).max(0.0);
+    params.jump_state.player_damage_cooldown =
+        (params.jump_state.player_damage_cooldown - dt).max(0.0);
+    params.timers.monster_contact_sfx_cooldown =
+        (params.timers.monster_contact_sfx_cooldown - dt).max(0.0);
+    params.timers.warp_cooldown = (params.timers.warp_cooldown - dt).max(0.0);
+    params.jump_state.jump_float_timer = (params.jump_state.jump_float_timer - dt).max(0.0);
 
-        // ── Movement Input (original lines 16582-16590) ──
+    for (mut ext_force, mut ext_impulse, mut rb_vel, spatial, player_tf, mut damping) in
+        params.query.iter_mut()
+    {
+        damping.linear_damping = if params.hyper.gravity_hold {
+            params.hyper.ball_friction_shift
+        } else {
+            params.hyper.ball_friction_default
+        };
+
+        let input_up = -params.gravity.0.normalize_or_zero();
+
         let mut move_input = Vec2::ZERO;
-        if keyboard_input.pressed(KeyCode::KeyW) { move_input.y += 1.0; }
-        if keyboard_input.pressed(KeyCode::KeyS) { move_input.y -= 1.0; }
-        if keyboard_input.pressed(KeyCode::KeyA) { move_input.x += 1.0; }
-        if keyboard_input.pressed(KeyCode::KeyD) { move_input.x -= 1.0; }
+        if params.keyboard_input.pressed(KeyCode::KeyW) {
+            move_input.y += 1.0;
+        }
+        if params.keyboard_input.pressed(KeyCode::KeyS) {
+            move_input.y -= 1.0;
+        }
+        if params.keyboard_input.pressed(KeyCode::KeyA) {
+            move_input.x += 1.0;
+        }
+        if params.keyboard_input.pressed(KeyCode::KeyD) {
+            move_input.x -= 1.0;
+        }
 
         let cam_forward = cam_tf.forward().as_vec3();
         let mut forward = cam_forward - input_up * cam_forward.dot(input_up);
@@ -66,24 +100,20 @@ pub(crate) fn player_physics_controller(
             move_dir = move_dir.normalize();
         }
 
-        // ── Applied Forces (original lines 16636–16654) ──
-        let mut applied_force = gravity.0 * 1.25; // mass 1.25 parity
+        let mut applied_force = params.gravity.0 * 1.25;
         let mut applied_torque = Vec3::ZERO;
 
         if manual_move_active {
-            // Roll torque and central force (original lines 16641-16644)
             let torque_axis = input_up.cross(move_dir);
             applied_torque = torque_axis * ROLL_TORQUE;
             applied_force += move_dir * (ROLL_FORCE * 0.56);
-            timers.last_move_dir = move_dir;
+            params.timers.last_move_dir = move_dir;
 
-            // Steering (original lines 16710-16713)
             let horizontal_vel = rb_vel.linvel - input_up * rb_vel.linvel.dot(input_up);
             let desired_velocity = move_dir * MAX_BALL_SPEED;
             let steer = desired_velocity - horizontal_vel;
             applied_force += steer * LINK_CONTROL_GAIN;
         } else {
-            // Decelerate if no input (original lines 16714-16719)
             let brake = (1.0 - dt * LINK_BRAKE_DRAG).max(0.0);
             let vertical = input_up * rb_vel.linvel.dot(input_up);
             let horizontal = rb_vel.linvel - vertical;
@@ -91,45 +121,54 @@ pub(crate) fn player_physics_controller(
             rb_vel.angvel *= (1.0 - dt * (LINK_BRAKE_DRAG * 0.82)).max(0.0);
         }
 
-        // ── Hyperspace W-Force (original lines 16424-16526) ──
         let mut hyper_input = 0.0_f32;
-        if keyboard_input.pressed(KeyCode::KeyQ) { hyper_input -= 2.0; }
-        if keyboard_input.pressed(KeyCode::KeyE) { hyper_input += 2.0; }
+        if params.keyboard_input.pressed(KeyCode::KeyQ) {
+            hyper_input -= 2.0;
+        }
+        if params.keyboard_input.pressed(KeyCode::KeyE) {
+            hyper_input += 2.0;
+        }
 
         if hyper_input.abs() > 1e-6 {
-            let w_phase = if hyper.w_limit <= 1e-6 { 0.0 } else {
-                (spatial.w / hyper.w_limit).clamp(-1.0, 1.0)
+            let w_phase = if params.hyper.w_limit <= 1e-6 {
+                0.0
+            } else {
+                (spatial.w / params.hyper.w_limit).clamp(-1.0, 1.0)
             };
             let axis_angle = w_phase * (std::f32::consts::FRAC_PI_2);
 
             let planar_forward = forward;
             let side = input_up.cross(planar_forward).normalize_or_zero();
-            let hyper_axis = (planar_forward * axis_angle.cos() + side * axis_angle.sin())
-                .normalize_or_zero();
+            let hyper_axis =
+                (planar_forward * axis_angle.cos() + side * axis_angle.sin()).normalize_or_zero();
 
             let input_sign: f32 = if hyper_input < 0.0 { -1.0 } else { 1.0 };
-            let force = hyper_axis * (hyper_input.abs() * hyper.force_strength)
-                + input_up * (input_sign * hyper_input.abs() * hyper.force_strength * hyper.force_lift);
+            let force = hyper_axis * (hyper_input.abs() * params.hyper.force_strength)
+                + input_up
+                    * (input_sign
+                        * hyper_input.abs()
+                        * params.hyper.force_strength
+                        * params.hyper.force_lift);
             applied_force += force;
         }
 
-        // ── Gravity hold brake (original lines 16703-16707) ──
-        if hyper.gravity_hold {
-            let brake_factor = (1.0 - dt * hyper.shift_brake_drag).max(0.0);
+        if params.hyper.gravity_hold {
+            let brake_factor = (1.0 - dt * params.hyper.shift_brake_drag).max(0.0);
             rb_vel.linvel *= brake_factor;
-            rb_vel.angvel *= (1.0 - dt * (hyper.shift_brake_drag * 0.5)).max(0.0);
+            rb_vel.angvel *= (1.0 - dt * (params.hyper.shift_brake_drag * 0.5)).max(0.0);
         }
 
         ext_force.force = applied_force;
         ext_force.torque = applied_torque;
 
-        // ── Jump (original lines 16787-16812) ──
-        if keyboard_input.just_pressed(KeyCode::Space) {
-            jump_state.jump_queued = true;
+        if params.keyboard_input.just_pressed(KeyCode::Space) {
+            params.jump_state.jump_queued = true;
         }
 
-        if jump_state.jump_queued {
-            if jump_state.infinite_jumps || jump_state.jumps_used < jump_state.max_jumps {
+        if params.jump_state.jump_queued {
+            if params.jump_state.infinite_jumps
+                || params.jump_state.jumps_used < params.jump_state.max_jumps
+            {
                 let mut jump_up = input_up;
                 if jump_up.length_squared() < 1e-8 {
                     jump_up = Vec3::Y;
@@ -137,56 +176,51 @@ pub(crate) fn player_physics_controller(
                     jump_up = jump_up.normalize();
                 }
 
-                // Boost direction from current velocity (original lines 16795-16803)
                 let vel_dot = rb_vel.linvel.dot(jump_up);
                 let current_up_vel = if vel_dot > 0.0 { vel_dot } else { 0.0 };
-                
-                // Parity: _suppress_wall_climb_velocity (original line 11849)
-                // Cap upward jump velocity if we are hugging a wall/obstacle
-                let max_up_speed = 0.9; 
+
+                let max_up_speed = 0.9;
                 let mut final_impulse_mag = JUMP_IMPULSE * JUMP_RISE_BOOST;
-                
-                // If already moving up fast (e.g. wall climbing), cap the boost
+
                 if current_up_vel > max_up_speed {
-                   final_impulse_mag = (final_impulse_mag * 0.5).min(max_up_speed);
+                    final_impulse_mag = (final_impulse_mag * 0.5).min(max_up_speed);
                 }
 
                 let mut impulse = jump_up * final_impulse_mag;
 
                 let mut boost_dir = rb_vel.linvel - jump_up * rb_vel.linvel.dot(jump_up);
                 if boost_dir.length_squared() < 1e-6 {
-                    boost_dir = timers.last_move_dir;
+                    boost_dir = params.timers.last_move_dir;
                 }
-                
+
                 if boost_dir.length_squared() > 1e-6 {
                     let boost_dir = boost_dir.normalize();
                     impulse += boost_dir * (SPACE_BOOST_IMPULSE * 0.2);
                 }
                 ext_impulse.impulse = impulse;
 
-                if !jump_state.infinite_jumps {
-                    jump_state.jumps_used += 1;
+                if !params.jump_state.infinite_jumps {
+                    params.jump_state.jumps_used += 1;
                 }
-                jump_state.grounded = false;
-                jump_state.jump_float_timer = jump_state.jump_float_duration;
+                params.jump_state.grounded = false;
+                params.jump_state.jump_float_timer = params.jump_state.jump_float_duration;
 
-                sfx_events.send(crate::effects::audio::PlaySfxEvent {
+                params.sfx_events.send(crate::effects::audio::PlaySfxEvent {
                     kind: crate::effects::audio::SfxKind::Jump,
-                    volume: 0.72, pitch: 1.2, position: Some(player_tf.translation),
+                    volume: 0.72,
+                    pitch: 1.2,
+                    position: Some(player_tf.translation),
                 });
             }
-            jump_state.jump_queued = false;
+            params.jump_state.jump_queued = false;
         }
 
-        // ── Cooldowns ──
-        let dt = time.delta_seconds();
+        let dt = params.time.delta_seconds();
         stats.hyperbomb_cooldown = (stats.hyperbomb_cooldown - dt).max(0.0);
         stats.magic_missile_cooldown = (stats.magic_missile_cooldown - dt).max(0.0);
 
-        // ── Weapon Input ──
-        // Parity with main.py:1254-1265
-        if mouse_input.just_pressed(MouseButton::Left) {
-            if let Ok(mut weapon) = weapon_query.get_single_mut() {
+        if params.mouse_input.just_pressed(MouseButton::Left) {
+            if let Ok(mut weapon) = params.weapon_query.get_single_mut() {
                 if weapon.state == WeaponState::Idle {
                     weapon.state = WeaponState::Throw;
                     weapon.timer = 0.0;
@@ -194,41 +228,47 @@ pub(crate) fn player_physics_controller(
                 }
             }
         }
-        if mouse_input.just_pressed(MouseButton::Right) {
-            if let Ok(mut weapon) = weapon_query.get_single_mut() {
+        if params.mouse_input.just_pressed(MouseButton::Right) {
+            if let Ok(mut weapon) = params.weapon_query.get_single_mut() {
                 if weapon.state == WeaponState::Idle {
                     weapon.state = WeaponState::Spin;
                     weapon.timer = 0.0;
-                    sfx_events.send(crate::effects::audio::PlaySfxEvent {
+                    params.sfx_events.send(crate::effects::audio::PlaySfxEvent {
                         kind: crate::effects::audio::SfxKind::WeaponSwing,
-                        volume: 1.0, pitch: 1.0, position: None,
+                        volume: 1.0,
+                        pitch: 1.0,
+                        position: None,
                     });
                 }
             }
         }
-        if mouse_input.just_pressed(MouseButton::Middle) {
-            if weapon_query.get_single().map(|w| w.state == WeaponState::Idle).unwrap_or(false) {
-                if stats.hyperbomb_cooldown <= 0.0 {
-                    if let Ok(mut weapon) = weapon_query.get_single_mut() {
-                        weapon.state = WeaponState::Hyperbomb;
-                        stats.hyperbomb_cooldown = 0.65; 
-                    }
-                }
+        if params.mouse_input.just_pressed(MouseButton::Middle)
+            && params
+                .weapon_query
+                .get_single()
+                .map(|w| w.state == WeaponState::Idle)
+                .unwrap_or(false)
+            && stats.hyperbomb_cooldown <= 0.0
+        {
+            if let Ok(mut weapon) = params.weapon_query.get_single_mut() {
+                weapon.state = WeaponState::Hyperbomb;
+                stats.hyperbomb_cooldown = 0.65;
             }
         }
-        if keyboard_input.just_pressed(KeyCode::KeyR) {
-             if stats.magic_missile_cooldown <= 0.0 {
-                if let Ok(mut weapon) = weapon_query.get_single_mut() {
-                    if weapon.state == WeaponState::Idle {
-                        weapon.state = WeaponState::MagicMissile;
-                        stats.magic_missile_cooldown = 1.4;
-                        sfx_events.send(crate::effects::audio::PlaySfxEvent {
-                            kind: crate::effects::audio::SfxKind::WeaponWarp, // Fixed variant
-                            volume: 0.8, pitch: 1.2, position: None,
-                        });
-                    }
+        if params.keyboard_input.just_pressed(KeyCode::KeyR) && stats.magic_missile_cooldown <= 0.0
+        {
+            if let Ok(mut weapon) = params.weapon_query.get_single_mut() {
+                if weapon.state == WeaponState::Idle {
+                    weapon.state = WeaponState::MagicMissile;
+                    stats.magic_missile_cooldown = 1.4;
+                    params.sfx_events.send(crate::effects::audio::PlaySfxEvent {
+                        kind: crate::effects::audio::SfxKind::WeaponWarp,
+                        volume: 0.8,
+                        pitch: 1.2,
+                        position: None,
+                    });
                 }
-             }
+            }
         }
     }
 }
@@ -246,31 +286,23 @@ pub(crate) fn apply_hyperspace_physics(
     time: Res<Time>,
 ) {
     let dt = time.delta_seconds();
-    let Ok((mut vel, mut tf, mut spatial)) = query.get_single_mut() else { return };
+    let Ok((mut vel, mut tf, mut spatial)) = query.get_single_mut() else {
+        return;
+    };
 
     let hyperspace_active = hyper.is_active(spatial.w);
-    let _hyperspace_amount = hyper.amount(spatial.w);
-
-    if !hyperspace_active { return; }
+    if !hyperspace_active {
+        return;
+    }
 
     let gravity_hold_override = hyperspace_active && hyper.gravity_hold;
 
-    // Gravity modulation in hyperspace (original lines 16489-16491)
-    // When in hyperspace and NOT holding shift, gravity oscillates
     if !gravity_hold_override {
-        let _input_up = -gravity.0.normalize_or_zero();
         let g_mag = gravity.0.length().max(0.1);
         let mag_scale = 0.72 + 0.28 * (timers.roll_time * 1.35).sin();
-        // This is handled through the gravity resource in a real implementation,
-        // but we apply the scaled gravity effect directly here:
         let gravity_mod = gravity.0.normalize_or_zero() * (g_mag * mag_scale - g_mag);
         vel.linvel += gravity_mod * dt;
 
-        // Original bounding box bounce removed. Seamless world wrap takes over.
-
-        // ─────────────────────────────────────────────────────────────────────────────
-        // Mobius Twist Warp Portals
-        // ─────────────────────────────────────────────────────────────────────────────
         if timers.warp_cooldown <= 0.0 {
             for link in &graph.warp_links {
                 let d_a = tf.translation.distance_squared(link.a_pos);
@@ -286,38 +318,38 @@ pub(crate) fn apply_hyperspace_physics(
                 };
 
                 if is_hit {
-                    // Python parity: _apply_room_fold_warp -> _apply_room_fold_twist
                     let up = -gravity.0.normalize_or_zero();
-                    let mut fold_push = if from_a { target_pos - source_pos } else { source_pos - target_pos };
+                    let mut fold_push = if from_a {
+                        target_pos - source_pos
+                    } else {
+                        source_pos - target_pos
+                    };
                     fold_push = fold_push - up * fold_push.dot(up);
                     if fold_push.length_squared() > 1e-8 {
                         fold_push = fold_push.normalize();
                     }
 
                     if link.mobius {
-                        let twist_strength = 0.9; // Python parity: mobius_twist_strength
                         let (out_vel, new_w) = compute_mobius_fold_twist(
                             vel.linvel,
                             fold_push,
                             up,
-                            spatial.w,
-                            timers.roll_time,
-                            link.mobius_phase,
-                            twist_strength,
-                            hyper.w_limit,
+                            MobiusTwistParams {
+                                player_w: spatial.w,
+                                roll_time: timers.roll_time,
+                                phase: link.mobius_phase,
+                                twist_strength: 0.9,
+                                hyper_w_limit: hyper.w_limit,
+                            },
                         );
                         vel.linvel = out_vel;
                         spatial.w = new_w;
                         spatial.target_w = new_w;
                     } else {
-                        // Standard non-twisting portal boost
                         vel.linvel = vel.linvel * 0.85 + fold_push * 2.4;
                     }
 
-                    // Teleport the player
                     tf.translation = target_pos + up * 0.34;
-                    // Because timers is an immutable Res<PhysicsTimers> in this system, calculate locally or refactor system params.
-                    // Actually, let's just use game mechanics: teleport moves you OUT of the portal sphere immediately anyway.
                     break;
                 }
             }
@@ -335,11 +367,7 @@ pub(crate) fn apply_world_wrap(
     graph: Res<crate::map::DungeonGraph>,
     config: Res<crate::map::GenerationConfig>,
 ) {
-    if graph.rooms.is_empty() { return; }
-
-    // In arena mode we want \"invisible wall\" behavior instead of topology wrap.
-    // World wrap is still used for other layouts (hexmix / maze3d / etc.).
-    if config.layout_mode == "arena" {
+    if graph.rooms.is_empty() || config.layout_mode == "arena" {
         return;
     }
 
@@ -351,12 +379,8 @@ pub(crate) fn apply_world_wrap(
     let span_x = map_w;
     let span_y = map_d;
 
-    let (high_y_base, low_y_base) = if config.layout_mode == "arena" {
-        (15.3, -15.3)
-    } else {
-        (config.room_height + 4.0, -1.4)
-    };
-
+    let high_y_base = config.room_height + 4.0;
+    let low_y_base = -1.4;
     let span_z = (high_y_base - low_y_base).max(0.001);
 
     let low_x = -margin;
@@ -414,19 +438,21 @@ pub(crate) fn apply_jump_float_drag(
     jump_state: Res<JumpState>,
     time: Res<Time>,
 ) {
-    if jump_state.grounded { return; }
+    if jump_state.grounded {
+        return;
+    }
     let dt = time.delta_seconds();
-    let Ok(mut vel) = query.get_single_mut() else { return };
+    let Ok(mut vel) = query.get_single_mut() else {
+        return;
+    };
 
     let input_up = -gravity.0.normalize_or_zero();
     let vertical_speed = vel.linvel.dot(input_up);
     let horizontal = vel.linvel - input_up * vertical_speed;
 
     let new_vertical = if jump_state.jump_float_timer > 0.0 && vertical_speed > 0.0 {
-        // Rising with float active — reduce upward deceleration
         vertical_speed * (1.0 - dt * jump_state.jump_float_drag).max(0.0)
     } else if vertical_speed < 0.0 {
-        // Falling — apply fall drag
         vertical_speed * (1.0 - dt * jump_state.float_fall_drag).max(0.0)
     } else {
         vertical_speed
@@ -454,15 +480,12 @@ pub(crate) fn apply_compression_physics(
         let mut new_vertical = vertical_speed;
 
         if compression_factor < 0.999 {
-            // Compressed space: drag (original lines 16680-16689)
-            let h_drag = (1.0 - (1.0 - compression_factor) * 0.12).powf(vel.linvel.xz().length() * 0.35);
+            let h_drag =
+                (1.0 - (1.0 - compression_factor) * 0.12).powf(vel.linvel.xz().length() * 0.35);
             let v_drag = (1.0 - (1.0 - compression_factor) * 0.08).powf(vel.linvel.y.abs() * 0.45);
-            // Reduced drag when actively moving (original lines 16683-16685)
-            // TODO: check desired_move_dir — for now always apply base drag
             horizontal *= h_drag;
             new_vertical *= v_drag;
         } else if compression_factor > 1.001 {
-            // Expanded space: boost (original lines 16690-16699)
             let gain = compression_factor - 1.0;
             let h_boost = (1.0 + gain * dt * 2.4).min(1.9);
             let v_boost = (1.0 + gain * dt * 1.4).min(1.6);
@@ -499,24 +522,20 @@ pub(crate) fn apply_vertical_limits(
     gravity: Res<GravityDirection>,
     config: Res<crate::map::GenerationConfig>,
 ) {
-    let Ok((mut tf, mut vel)) = query.get_single_mut() else { return };
+    let Ok((mut tf, mut vel)) = query.get_single_mut() else {
+        return;
+    };
 
     let mut pos = tf.translation;
     let mut corrected = false;
     let mut hit_top = false;
     let mut hit_bottom = false;
-    let mut hit_left = false;
-    let mut hit_right = false;
-    let mut hit_front = false;
-    let mut hit_back = false;
+    let mut hit_boundary_v = Vec3::ZERO;
 
     if config.layout_mode == "arena" {
-        // Invisible wall behavior for arena: clamp to the playable band.
-        // Vertical: visual echo band around floor (≈ [-1.4, 12.0]).
         let min_y = -1.4 + 0.5;
         let max_y = 12.0 - 0.5;
 
-        // Horizontal: map extents [0, map_w] with a small inset margin.
         let map_w = 176.0 * config.scale;
         let margin = 0.35;
         let min_x = margin;
@@ -537,24 +556,23 @@ pub(crate) fn apply_vertical_limits(
         if pos.x < min_x {
             pos.x = min_x;
             corrected = true;
-            hit_left = true;
+            hit_boundary_v.x = -1.0;
         } else if pos.x > max_x {
             pos.x = max_x;
             corrected = true;
-            hit_right = true;
+            hit_boundary_v.x = 1.0;
         }
 
         if pos.z < min_z {
             pos.z = min_z;
             corrected = true;
-            hit_back = true;
+            hit_boundary_v.z = -1.0;
         } else if pos.z > max_z {
             pos.z = max_z;
             corrected = true;
-            hit_front = true;
+            hit_boundary_v.z = 1.0;
         }
     } else {
-        // Other layouts: only clamp vertical hyper-bounds derived from room_height.
         let high_y_base = config.room_height + 4.0;
         let low_y_base = -1.4;
         let min_y = low_y_base + 0.5;
@@ -573,32 +591,19 @@ pub(crate) fn apply_vertical_limits(
 
     if corrected {
         let mut v = vel.linvel;
-
-        // Vertical: kill upward/downward component only when pushing against the band.
         let up = -gravity.0.normalize_or_zero();
+
         if up.length_squared() > 1e-8 {
-            let v_up = up * v.dot(up);
-            let v_lat = v - v_up;
-            let pushing_up = hit_top && v_up.dot(up) > 0.0;
-            let pushing_down = hit_bottom && v_up.dot(up) < 0.0;
-            if pushing_up || pushing_down {
-                v = v_lat;
+            let v_up_comp = v.dot(up);
+            if (hit_top && v_up_comp > 0.0) || (hit_bottom && v_up_comp < 0.0) {
+                v -= up * v_up_comp;
             }
         }
 
-        // Horizontal X: stop motion into the wall, allow tangential sliding.
-        if hit_left && v.x < 0.0 {
+        if (hit_boundary_v.x < 0.0 && v.x < 0.0) || (hit_boundary_v.x > 0.0 && v.x > 0.0) {
             v.x = 0.0;
         }
-        if hit_right && v.x > 0.0 {
-            v.x = 0.0;
-        }
-
-        // Horizontal Z: same idea for front/back walls.
-        if hit_back && v.z < 0.0 {
-            v.z = 0.0;
-        }
-        if hit_front && v.z > 0.0 {
+        if (hit_boundary_v.z < 0.0 && v.z < 0.0) || (hit_boundary_v.z > 0.0 && v.z > 0.0) {
             v.z = 0.0;
         }
 
@@ -616,15 +621,16 @@ pub(crate) fn anti_tunneling_system(
     mut prev_state: ResMut<PrevBallState>,
     rapier_context: Res<RapierContext>,
 ) {
-    let Ok((mut tf, mut vel, player_entity)) = query.get_single_mut() else { return };
+    let Ok((mut tf, mut vel, player_entity)) = query.get_single_mut() else {
+        return;
+    };
 
     let curr_pos = tf.translation;
     let prev_pos = prev_state.position;
     let travel = curr_pos - prev_pos;
     let travel_dist = travel.length();
 
-    let min_travel = crate::player::TUNNEL_MIN_TRAVEL;
-    if travel_dist > min_travel {
+    if travel_dist > TUNNEL_MIN_TRAVEL {
         let ray_dir = travel.normalize();
         let filter = QueryFilter::default()
             .exclude_collider(player_entity)
@@ -633,15 +639,11 @@ pub(crate) fn anti_tunneling_system(
                 Group::all().difference(Group::GROUP_32),
             ));
 
-        if let Some((_, toi)) = rapier_context.cast_ray(
-            prev_pos,
-            ray_dir,
-            travel_dist,
-            true,
-            filter,
-        ) {
+        if let Some((_, toi)) =
+            rapier_context.cast_ray(prev_pos, ray_dir, travel_dist, true, filter)
+        {
             let hit_pos = prev_pos + ray_dir * toi;
-            let safe_pos = hit_pos - ray_dir * (crate::player::BALL_RADIUS + 0.02);
+            let safe_pos = hit_pos - ray_dir * (BALL_RADIUS + 0.02);
             tf.translation = safe_pos;
 
             let v_along = vel.linvel.dot(ray_dir);
@@ -651,7 +653,6 @@ pub(crate) fn anti_tunneling_system(
         }
     }
 
-    // Store for next frame
     prev_state.position = tf.translation;
     prev_state.velocity = vel.linvel;
 }
@@ -667,23 +668,27 @@ pub(crate) fn ball_contact_analysis(
     gravity: Res<GravityDirection>,
     mut jump_state: ResMut<JumpState>,
 ) {
-    let Ok((player_entity, player_tf)) = query.get_single() else { return };
+    let Ok((player_entity, player_tf)) = query.get_single() else {
+        return;
+    };
     let input_up = -gravity.0.normalize_or_zero();
-    // Ground detection: cast a short ray downward
     let ray_origin = player_tf.translation;
-    let ray_dir = -input_up; // gravity direction = down
+    let ray_dir = -input_up;
     let ray_dist = BALL_RADIUS + 0.15;
 
     let was_grounded = jump_state.grounded;
     jump_state.prev_grounded = was_grounded;
 
     if let Some((_, _toi)) = rapier_context.cast_ray(
-        ray_origin, ray_dir, ray_dist, true,
+        ray_origin,
+        ray_dir,
+        ray_dist,
+        true,
         QueryFilter::default().exclude_collider(player_entity),
     ) {
         jump_state.grounded = true;
         if jump_state.grounded {
-            jump_state.jumps_used = 0; // Reset jumps on ground contact (original line 16758)
+            jump_state.jumps_used = 0;
         }
     } else {
         jump_state.grounded = false;
@@ -697,7 +702,6 @@ pub(crate) fn w_dimension_shift(
     mut hyper: ResMut<HyperspaceState>,
     time: Res<Time>,
 ) {
-    // Shift key gravity hold (parity with main.py:1260-1263)
     hyper.gravity_hold = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
     for mut spatial in query.iter_mut() {
@@ -706,27 +710,31 @@ pub(crate) fn w_dimension_shift(
         }
 
         let shift_speed = 10.0;
-        spatial.w = spatial.w.lerp(spatial.target_w, shift_speed * time.delta_seconds());
-        // Clamp to hyper_w_limit (original line 16442)
+        spatial.w = spatial
+            .w
+            .lerp(spatial.target_w, shift_speed * time.delta_seconds());
         spatial.w = spatial.w.clamp(-hyper.w_limit, hyper.w_limit);
         spatial.target_w = spatial.target_w.clamp(-hyper.w_limit, hyper.w_limit);
         spatial.layer = (spatial.w / 5.0).round() as i32;
     }
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Mobius Topology Math
 // ─────────────────────────────────────────────────────────────────────────────
+pub struct MobiusTwistParams {
+    pub player_w: f32,
+    pub roll_time: f32,
+    pub phase: f32,
+    pub twist_strength: f32,
+    pub hyper_w_limit: f32,
+}
+
 pub fn compute_mobius_fold_twist(
     vel: Vec3,
     fold_push: Vec3,
     up: Vec3,
-    player_w: f32,
-    roll_time: f32,
-    phase: f32,
-    twist_strength: f32,
-    hyper_w_limit: f32,
+    p: MobiusTwistParams,
 ) -> (Vec3, f32) {
     let mut side = up.cross(fold_push);
     if side.length_squared() > 1.0e-8 {
@@ -746,14 +754,14 @@ pub fn compute_mobius_fold_twist(
     // Twist translates the fold components (inverting side)
     let twisted = f_comp - s_comp + u_comp * 0.9;
 
-    let twist = twist_strength.clamp(0.0, 1.0);
+    let twist = p.twist_strength.clamp(0.0, 1.0);
     // Invert the W coordinate (mirror-world topology flip) and add wobble
-    let wobble = (roll_time * 0.32 + phase).sin() * (1.0 - twist) * hyper_w_limit * 0.22;
-    let new_w = (-player_w * twist + wobble).clamp(-hyper_w_limit, hyper_w_limit);
+    let wobble = (p.roll_time * 0.32 + p.phase).sin() * (1.0 - twist) * p.hyper_w_limit * 0.22;
+    let new_w = (-p.player_w * twist + wobble).clamp(-p.hyper_w_limit, p.hyper_w_limit);
 
     // Apply boost vector to exit
     let out_v = twisted * 0.9 + fold_push * 1.75;
-    
+
     (out_v, new_w)
 }
 
@@ -762,15 +770,24 @@ pub fn compute_mobius_fold_twist(
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(crate) fn update_compression_factor(
-    mut player_query: Query<(&Transform, &mut CompressionState), With<Player>>,
+    mut player_query: Query<
+        (
+            &Transform,
+            &bevy_rapier3d::prelude::Velocity,
+            &mut CompressionState,
+        ),
+        With<Player>,
+    >,
     room_query: Query<(&Transform, &crate::map::DimensionField, &crate::map::Room)>,
     time: Res<Time>,
 ) {
-    let Ok((player_tf, mut state)) = player_query.get_single_mut() else { return };
+    let Ok((player_tf, vel, mut state)) = player_query.get_single_mut() else {
+        return;
+    };
     let pos = player_tf.translation;
     let t = time.elapsed_seconds();
 
-    let mut factor = 1.0;
+    let mut factor = 1.0_f32;
 
     for (room_tf, field, room_ref) in room_query.iter() {
         let half_w = room_tf.scale.x * 0.5;
@@ -786,38 +803,44 @@ pub(crate) fn update_compression_factor(
             let room_base = field.base + field.amp * wave;
             let spatial_blend = center * field.center_bias + edge * field.edge_bias;
             factor = 1.0 + (room_base - 1.0) * spatial_blend.clamp(0.0, 1.0);
-            
-            // Loop through pockets for localized distortions
-            let mut max_pocket_influence = 0.0;
-            let mut target_pocket_factor = factor;
-            
+
             for pocket in &room_ref.pockets {
-                // Determine 2D distance
                 let p2d = Vec2::new(pos.x, pos.z);
                 let dist = p2d.distance(pocket.position);
-                
+
                 if dist < pocket.radius {
-                    // Cosine falloff
-                    let influence = ((dist / pocket.radius) * std::f32::consts::PI).cos() * 0.5 + 0.5;
-                    if influence > max_pocket_influence {
-                        max_pocket_influence = influence;
-                        target_pocket_factor = pocket.factor;
-                    }
+                    // Parity-inspired falloff: closer to center = stronger influence,
+                    // using a power falloff similar to the original's influence_power (~0.78).
+                    let norm = (dist / pocket.radius).clamp(0.0, 1.0);
+                    let influence = (1.0 - norm).powf(0.78);
+
+                    // Pocket factor (< 1.0 = compression, > 1.0 = dilation).
+                    // Blend multiplicatively toward the pocket's factor based on influence.
+                    let local_factor = pocket.factor;
+                    let pocket_effect = 1.0 + (local_factor - 1.0) * influence;
+
+                    // Clamp to original's pocket bounds.
+                    let pocket_effect_clamped = pocket_effect.clamp(0.55, 1.85);
+                    factor *= pocket_effect_clamped;
                 }
             }
-            
-            // Blend base room factor with the strongest pocket influence
-            factor = factor * (1.0 - max_pocket_influence) + target_pocket_factor * max_pocket_influence;
-            
+
             break;
         }
     }
 
-    state.factor = factor;
-    state.factor_smoothed += (factor - state.factor_smoothed) * (time.delta_seconds() * COMPRESSION_SMOOTH_SPEED).min(1.0);
+    // Travel dilation: fast movement slightly increases effective dilation
+    // (parity with original travel_dilation term).
+    let speed = vel.linvel.length();
+    let speed_norm = (speed / 15.25_f32).clamp(0.0, 1.0);
+    let travel_dilation = 1.0_f32 + speed_norm * 0.12_f32;
+    factor *= travel_dilation;
+
+    // Clamp to original compression range.
+    state.factor = factor.clamp(0.42_f32, 1.9_f32);
+    state.factor_smoothed += (factor - state.factor_smoothed)
+        * (time.delta_seconds() * COMPRESSION_SMOOTH_SPEED).min(1.0);
 }
-
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Collision Group Sync
@@ -831,7 +854,7 @@ pub(crate) fn sync_collision_groups(
         let clamped_layer = spatial.layer.clamp(-15, 15);
         let group_bit = 1 << (clamped_layer + 15);
         let membership = Group::from_bits_truncate(group_bit as u32);
-        
+
         // Filter: participate in own layer + hit Group 32 (Ceiling/Floor)
         let filter = membership | Group::GROUP_32;
 
@@ -902,7 +925,6 @@ pub(crate) fn apply_water_buoyancy(
         let depth = water_h - bottom_z;
 
         if depth <= 0.0 {
-            // Ball is above water — no buoyancy
             continue;
         }
 
@@ -911,16 +933,14 @@ pub(crate) fn apply_water_buoyancy(
             continue;
         }
 
-        // Python parity: mass=1.25, g_mag=9.62
         let mass = 1.25_f32;
         let g_mag = gravity.0.length().max(0.1);
         let submerge = (depth / (BALL_RADIUS * 1.9).max(0.05)).clamp(0.0, 1.35);
 
-        // Buoyancy force (Python parity: mass * g * (bias + submerge * strength))
-        let buoy_force = up * (mass * g_mag * (WATER_BUOYANCY_BIAS + submerge * WATER_BUOYANCY_STRENGTH));
+        let buoy_force =
+            up * (mass * g_mag * (WATER_BUOYANCY_BIAS + submerge * WATER_BUOYANCY_STRENGTH));
         ext_force.force += buoy_force;
 
-        // Water drag (Python parity: _apply_water_buoyancy lines 5246-5253)
         let v_up_speed = vel.linvel.dot(up);
         let v_planar = vel.linvel - up * v_up_speed;
 
@@ -930,4 +950,3 @@ pub(crate) fn apply_water_buoyancy(
         vel.linvel = v_planar * planar_drag + up * (v_up_speed * vertical_drag);
     }
 }
-

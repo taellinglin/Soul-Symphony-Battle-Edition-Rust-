@@ -91,13 +91,12 @@ fn fragment(
     let val = 0.6 + combined * 0.4;
     let color = hsv2rgb(vec3<f32>(hue, sat, val));
 
-    // Mix into PBR base color — keep some of the original material color for lighting
-    // -----------------------------------------------------------
-    // Final Compositing
-    // -----------------------------------------------------------
-    let base_layers = max(n0 * pulse0, max(n1 * pulse1, n2 * pulse2)); // Use nX * pulseX for individual layer contributions
-    var final_col = mix(settings.edge_color.rgb, color, 0.85); // Start with original color mix
-    final_col += edge_glow; // Add 4D edge glow
+    var final_col = mix(settings.edge_color.rgb, color, 0.85);
+    final_col += edge_glow;
+
+    let grain_uv = in.world_position.xz * 80.0 + in.world_position.y * 40.0 + t * 2.0;
+    let grain = (hash21(grain_uv) - 0.5) * 0.06;
+    final_col += vec3<f32>(grain, grain, grain);
 
     pbr_input.material.base_color = vec4<f32>(final_col * slice_alpha, slice_alpha);
     pbr_input.material.emissive   = vec4<f32>(final_col * 2.5 * slice_alpha, 1.0); // Boost for bloom

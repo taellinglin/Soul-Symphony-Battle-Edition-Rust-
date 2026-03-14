@@ -1,2 +1,11 @@
 target/
 rewrite-plan.md
+
+# Local build artifacts
+**/target/
+*.d
+
+# Editor / IDE
+.vscode/
+.idea/
+

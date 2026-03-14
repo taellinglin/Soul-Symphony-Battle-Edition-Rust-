@@ -5,10 +5,11 @@ pub struct AtmosphericParticlesPlugin;
 
 impl Plugin for AtmosphericParticlesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (
-            spawn_gravity_fields,
-            spawn_background_stars,
-        ).run_if(in_state(crate::systems::progression::GameState::Playing)));
+        app.add_systems(
+            Update,
+            (spawn_gravity_fields, spawn_background_stars)
+                .run_if(in_state(crate::systems::progression::GameState::Playing)),
+        );
     }
 }
 
@@ -25,7 +26,7 @@ fn spawn_gravity_fields(
 ) {
     for (_entity, room) in rooms_query.iter() {
         let _size = Vec3::new(room.w, 15.0, room.h);
-        
+
         let mut color_gradient = Gradient::new();
         color_gradient.add_key(0.0, Vec4::new(0.3, 0.8, 1.0, 0.0));
         color_gradient.add_key(0.2, Vec4::new(0.3, 0.8, 1.0, 0.6));
@@ -68,8 +69,13 @@ fn spawn_gravity_fields(
             .init(init_lifetime)
             .init(init_velocity)
             .update(drag)
-            .render(ColorOverLifetimeModifier { gradient: color_gradient })
-            .render(SizeOverLifetimeModifier { gradient: size_gradient, screen_space_size: false })
+            .render(ColorOverLifetimeModifier {
+                gradient: color_gradient,
+            })
+            .render(SizeOverLifetimeModifier {
+                gradient: size_gradient,
+                screen_space_size: false,
+            })
             .render(OrientModifier {
                 mode: OrientMode::ParallelCameraDepthPlane,
                 rotation,
@@ -118,20 +124,26 @@ fn spawn_background_stars(
 
         let rotation = Some(writer.lit(0.0).expr());
 
-        let effect = EffectAsset::new(vec![512], Spawner::once(256.0.into(), true), writer.finish())
-            .with_name("background_stars")
-            .init(init_pos)
-            .init(init_lifetime)
-            .init(init_velocity)
-            .render(ColorOverLifetimeModifier { gradient: color_gradient })
-            .render(SizeOverLifetimeModifier { 
-                gradient: Gradient::constant(Vec2::splat(0.12)),
-                screen_space_size: false 
-            })
-            .render(OrientModifier { 
-                mode: OrientMode::ParallelCameraDepthPlane, 
-                rotation 
-            });
+        let effect = EffectAsset::new(
+            vec![512],
+            Spawner::once(256.0.into(), true),
+            writer.finish(),
+        )
+        .with_name("background_stars")
+        .init(init_pos)
+        .init(init_lifetime)
+        .init(init_velocity)
+        .render(ColorOverLifetimeModifier {
+            gradient: color_gradient,
+        })
+        .render(SizeOverLifetimeModifier {
+            gradient: Gradient::constant(Vec2::splat(0.12)),
+            screen_space_size: false,
+        })
+        .render(OrientModifier {
+            mode: OrientMode::ParallelCameraDepthPlane,
+            rotation,
+        });
 
         let effect_handle = effects.add(effect);
 

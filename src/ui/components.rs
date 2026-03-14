@@ -63,7 +63,6 @@ pub struct GameOverUi;
 #[derive(Component)]
 pub struct WinUi;
 
-
 #[derive(Component)]
 pub struct NetworkMenuUi;
 

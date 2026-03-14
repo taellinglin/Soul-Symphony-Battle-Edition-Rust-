@@ -9,6 +9,18 @@ pub struct MapGeometry;
 #[derive(Component)]
 pub struct EchoSource;
 
+pub type EchoSourceQuery<'w, 's, T> = Query<
+    'w,
+    's,
+    (
+        &'static Transform,
+        &'static Handle<Mesh>,
+        &'static Handle<T>,
+        Option<&'static crate::components::Spatial4D>,
+    ),
+    With<EchoSource>,
+>;
+
 #[derive(Component)]
 pub struct InvertedEchoRoot;
 
@@ -38,13 +50,7 @@ pub struct GenerationConfig {
     pub wall_thickness: f32,
     pub floor_thickness: f32,
     pub corridor_width: f32,
-    #[allow(dead_code)]
-    pub room_density: f32,
     pub corridor_density: f32,
-    #[allow(dead_code)]
-    pub decor_density: f32,
-    #[allow(dead_code)]
-    pub angled_room_ratio: f32,
     pub base_cube_unit: f32,
     pub max_rooms: i32,
 }
@@ -66,10 +72,7 @@ impl Default for GenerationConfig {
             wall_thickness: 0.2,
             floor_thickness: 0.2,
             corridor_width: 15.5,
-            room_density: 0.68,
             corridor_density: 0.64,
-            decor_density: 0.3,
-            angled_room_ratio: 0.2,
             base_cube_unit: 1.0,
             max_rooms: 64,
         }
@@ -77,10 +80,8 @@ impl Default for GenerationConfig {
 }
 
 #[derive(Resource, Default)]
-#[allow(dead_code)]
 pub struct DungeonGraph {
     pub rooms: Vec<Room>,
-    pub corridors: Vec<Corridor>,
     pub edges: Vec<(usize, usize)>,
     pub warp_links: Vec<crate::components::WarpLink>,
 }
@@ -140,11 +141,4 @@ impl Room {
     pub fn center(&self) -> Vec2 {
         Vec2::new(self.x + self.w * 0.5, self.y + self.h * 0.5)
     }
-}
-
-#[allow(dead_code)]
-pub struct Corridor {
-    pub start: Vec3,
-    pub end: Vec3,
-    pub w_layer: i32,
 }

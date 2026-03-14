@@ -273,6 +273,11 @@ fn fragment(
     let compression_mix = clamp(settings.compression_thermal_strength, 0.0, 1.0);
     final_rgb = mix(final_rgb, compression_col, compression_mix);
 
+    if (!thermal_only && settings.room_tex_strength > 0.01) {
+        final_rgb = clamp(final_rgb + room_desat * clamp(settings.room_tex_strength, 0.0, 1.0), vec3(0.0), vec3(1.0));
+    }
+    final_rgb = clamp(final_rgb, vec3(0.0), vec3(1.0));
+
     if (settings.thermal_mode > 0.5) {
         let field_a = fbm(world_xz * 0.08 + vec2(13.2, -7.4));
         let field_b = fbm(world_xz * 0.18 + vec2(-4.7, 9.1));
@@ -290,11 +295,6 @@ fn fragment(
         let thermal_blend = clamp(settings.thermal_strength * 0.6, 0.0, 1.0);
         final_rgb = mix(final_rgb, thermal_band, thermal_blend);
     }
-
-    if (!thermal_only && settings.room_tex_strength > 0.01) {
-        final_rgb = clamp(final_rgb + room_desat * clamp(settings.room_tex_strength, 0.0, 1.0), vec3(0.0), vec3(1.0));
-    }
-    final_rgb = clamp(final_rgb, vec3(0.0), vec3(1.0));
 
     // Reflection (uses offscreen inverted-echo texture when enabled)
     if (settings.reflection_strength > 0.001) {

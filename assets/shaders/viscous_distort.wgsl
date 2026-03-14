@@ -103,9 +103,19 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let bloom_mix = max(0.0, settings.bloom_strength) * (0.7 + 0.6 * strength);
     var final_rgb = col.rgb * (1.0 + 0.16 * strength);
     final_rgb += bloom * bloom_mix;
-    
-    // Apply Outline Darkening (Optional, if outline_strength > 0)
-    final_rgb *= (1.0 - edge * 0.5); 
-    
+
+    if (settings.outline_strength > 0.0) {
+        final_rgb *= (1.0 - edge * 0.5);
+    }
+
+    if (settings.quantize_steps >= 2.0) {
+        let luma = dot(final_rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+        if (luma > 0.52) {
+            final_rgb *= 0.5 / max(luma, 0.001);
+        } else {
+            final_rgb = vec3<f32>(0.0, 0.0, 0.0);
+        }
+    }
+
     return vec4<f32>(clamp(final_rgb, vec3<f32>(0.0), vec3<f32>(1.0)), col.a);
 }

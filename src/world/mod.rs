@@ -1,7 +1,7 @@
-pub mod items;
 pub mod anomalies;
-pub mod buoyancy;
 pub mod boss;
+pub mod buoyancy;
+pub mod items;
 pub mod water_crystals;
 
 use bevy::prelude::*;

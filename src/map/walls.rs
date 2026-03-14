@@ -1,8 +1,4 @@
-
-
 use super::types::Room;
-
-
 
 // Python parity: _get_room_anchor logic
 pub(crate) fn get_room_anchor(room: &Room, tx: f32, ty: f32) -> (f32, f32, &'static str, f32) {
@@ -25,5 +21,3 @@ pub(crate) fn get_room_anchor(room: &Room, tx: f32, ty: f32) -> (f32, f32, &'sta
         }
     }
 }
-
-

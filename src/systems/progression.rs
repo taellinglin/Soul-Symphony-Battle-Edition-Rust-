@@ -1,6 +1,6 @@
-use bevy::prelude::*;
 use crate::player::Player;
-use serde::{Serialize, Deserialize};
+use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::fs;
 
 #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
@@ -15,24 +15,31 @@ pub struct ProgressionPlugin;
 impl Plugin for ProgressionPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
-           .init_resource::<MonsterStats>()
-           .init_resource::<KillProtection>()
-           .add_event::<GainXpEvent>()
-           .add_event::<PlayerLevelUpEvent>()
-           .add_event::<HealEvent>()
-           .add_event::<SwordPowerupEvent>()
-           .add_systems(Startup, load_progress)
-           .add_systems(Update, (
-               xp_gain_handler,
-               level_up_handler,
-               heal_handler,
-               sword_pickup_handler,
-               tick_skill_buffs,
-               player_death_check,
-               update_combat_multipliers,
-               save_progress_on_level_up,
-           ).run_if(in_state(GameState::Playing)))
-           .add_systems(Update, game_over_countdown.run_if(in_state(GameState::GameOver)));
+            .init_resource::<MonsterStats>()
+            .init_resource::<KillProtection>()
+            .add_event::<GainXpEvent>()
+            .add_event::<PlayerLevelUpEvent>()
+            .add_event::<HealEvent>()
+            .add_event::<SwordPowerupEvent>()
+            .add_systems(Startup, load_progress)
+            .add_systems(
+                Update,
+                (
+                    xp_gain_handler,
+                    level_up_handler,
+                    heal_handler,
+                    sword_pickup_handler,
+                    tick_skill_buffs,
+                    player_death_check,
+                    update_combat_multipliers,
+                    save_progress_on_level_up,
+                )
+                    .run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                Update,
+                game_over_countdown.run_if(in_state(GameState::GameOver)),
+            );
     }
 }
 
@@ -68,7 +75,10 @@ pub struct KillProtection {
 
 impl Default for KillProtection {
     fn default() -> Self {
-        Self { stacks: 0, max_stacks: 24 }
+        Self {
+            stacks: 0,
+            max_stacks: 24,
+        }
     }
 }
 
@@ -78,10 +88,7 @@ pub struct MonsterStats {
     pub slain: usize,
 }
 
-fn tick_skill_buffs(
-    time: Res<Time>,
-    mut query: Query<&mut PlayerSkillBuffs, With<Player>>,
-) {
+fn tick_skill_buffs(time: Res<Time>, mut query: Query<&mut PlayerSkillBuffs, With<Player>>) {
     if let Ok(mut buffs) = query.get_single_mut() {
         buffs.haste.tick(time.delta());
         buffs.fury.tick(time.delta());
@@ -197,16 +204,16 @@ fn xp_gain_handler(
         for event in events.read() {
             let xp_gain = event.amount * (1.0 + (stats.int as f32 * 0.03));
             progression.xp += xp_gain;
-            
+
             while progression.xp >= progression.xp_next {
                 progression.xp -= progression.xp_next;
                 progression.level += 1;
                 progression.xp_next *= progression.xp_growth;
-                
+
                 let stats_list = ["attack", "defense", "dex", "sta", "int"];
                 let stat = stats_list[progression.stat_cycle_idx % stats_list.len()];
                 progression.stat_cycle_idx += 1;
-                
+
                 lv_events.send(PlayerLevelUpEvent {
                     _new_level: progression.level,
                     stat_boosted: stat.to_string(),
@@ -218,7 +225,14 @@ fn xp_gain_handler(
 
 fn level_up_handler(
     mut lv_events: EventReader<PlayerLevelUpEvent>,
-    mut query: Query<(&mut PlayerCombatStats, &mut crate::player::PlayerStats, &Transform), With<Player>>,
+    mut query: Query<
+        (
+            &mut PlayerCombatStats,
+            &mut crate::player::PlayerStats,
+            &Transform,
+        ),
+        With<Player>,
+    >,
     mut fx_events: EventWriter<crate::effects::FloatingTextEvent>,
     mut sfx_events: EventWriter<crate::effects::audio::PlaySfxEvent>,
 ) {
@@ -226,7 +240,9 @@ fn level_up_handler(
         if let Ok((mut stats, mut player_stats, tf)) = query.get_single_mut() {
             sfx_events.send(crate::effects::audio::PlaySfxEvent {
                 kind: crate::effects::audio::SfxKind::LevelUp,
-                volume: 0.9, pitch: 1.0, position: Some(tf.translation),
+                volume: 0.9,
+                pitch: 1.0,
+                position: Some(tf.translation),
             });
             let mut color = Color::srgba(0.5, 1.0, 0.6, 1.0);
             let text = format!("LEVEL UP: {}", event.stat_boosted.to_uppercase());
@@ -278,10 +294,12 @@ fn heal_handler(
         if let Ok((mut p_stats, tf)) = query.get_single_mut() {
             p_stats.hp += event.amount;
             p_stats.hp = p_stats.hp.min(p_stats.max_hp);
-            
+
             sfx_events.send(crate::effects::audio::PlaySfxEvent {
                 kind: crate::effects::audio::SfxKind::Heal,
-                volume: 0.8, pitch: 1.1, position: Some(tf.translation),
+                volume: 0.8,
+                pitch: 1.1,
+                position: Some(tf.translation),
             });
         }
     }
@@ -289,7 +307,14 @@ fn heal_handler(
 
 fn sword_pickup_handler(
     mut events: EventReader<SwordPowerupEvent>,
-    mut query: Query<(&mut PlayerCombatStats, &mut PlayerSkillBuffs, &mut crate::player::PlayerStats), With<Player>>,
+    mut query: Query<
+        (
+            &mut PlayerCombatStats,
+            &mut PlayerSkillBuffs,
+            &mut crate::player::PlayerStats,
+        ),
+        With<Player>,
+    >,
 ) {
     if let Ok((mut stats, mut buffs, mut p_stats)) = query.get_single_mut() {
         for event in events.read() {
@@ -390,7 +415,7 @@ fn update_combat_multipliers(
         // For now, let's just show it's integrated by checking if timers are active.
         // let _haste_active = buffs.haste.remaining_secs() > 0.0;
         // let _fury_active = buffs.fury.remaining_secs() > 0.0;
-        
+
         // This system can be expanded to modify PlayerStats components dynamically.
     }
 }
@@ -428,12 +453,10 @@ fn save_progress_on_level_up(
     }
 }
 
-fn load_progress(
-    mut commands: Commands,
-) {
+fn load_progress(mut commands: Commands) {
     if let Ok(json) = fs::read_to_string("assets/data/save_state.json") {
         if let Ok(data) = serde_json::from_str::<SaveData>(&json) {
-            // We'll update the player components when they spawn, 
+            // We'll update the player components when they spawn,
             // but since they spawn in Startup, we might need a Resource to hold this.
             commands.insert_resource(data);
         }

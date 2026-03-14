@@ -13,35 +13,131 @@ pub(crate) fn create_merged_box_mesh(boxes: &[(Vec3, Vec3)]) -> Mesh {
         // Standard 6 faces of a cube
         let vertices = [
             // Top
-            ([pos.x-half.x, pos.y+half.y, pos.z-half.z], [0.0, 1.0, 0.0], [0.0, 0.0]),
-            ([pos.x+half.x, pos.y+half.y, pos.z-half.z], [0.0, 1.0, 0.0], [1.0, 0.0]),
-            ([pos.x+half.x, pos.y+half.y, pos.z+half.z], [0.0, 1.0, 0.0], [1.0, 1.0]),
-            ([pos.x-half.x, pos.y+half.y, pos.z+half.z], [0.0, 1.0, 0.0], [0.0, 1.0]),
+            (
+                [pos.x - half.x, pos.y + half.y, pos.z - half.z],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y + half.y, pos.z - half.z],
+                [0.0, 1.0, 0.0],
+                [1.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y + half.y, pos.z + half.z],
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0],
+            ),
+            (
+                [pos.x - half.x, pos.y + half.y, pos.z + half.z],
+                [0.0, 1.0, 0.0],
+                [0.0, 1.0],
+            ),
             // Bottom
-            ([pos.x-half.x, pos.y-half.y, pos.z-half.z], [0.0, -1.0, 0.0], [0.0, 0.0]),
-            ([pos.x+half.x, pos.y-half.y, pos.z-half.z], [0.0, -1.0, 0.0], [1.0, 0.0]),
-            ([pos.x+half.x, pos.y-half.y, pos.z+half.z], [0.0, -1.0, 0.0], [1.0, 1.0]),
-            ([pos.x-half.x, pos.y-half.y, pos.z+half.z], [0.0, -1.0, 0.0], [0.0, 1.0]),
+            (
+                [pos.x - half.x, pos.y - half.y, pos.z - half.z],
+                [0.0, -1.0, 0.0],
+                [0.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y - half.y, pos.z - half.z],
+                [0.0, -1.0, 0.0],
+                [1.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y - half.y, pos.z + half.z],
+                [0.0, -1.0, 0.0],
+                [1.0, 1.0],
+            ),
+            (
+                [pos.x - half.x, pos.y - half.y, pos.z + half.z],
+                [0.0, -1.0, 0.0],
+                [0.0, 1.0],
+            ),
             // Front
-            ([pos.x-half.x, pos.y-half.y, pos.z+half.z], [0.0, 0.0, 1.0], [0.0, 0.0]),
-            ([pos.x+half.x, pos.y-half.y, pos.z+half.z], [0.0, 0.0, 1.0], [1.0, 0.0]),
-            ([pos.x+half.x, pos.y+half.y, pos.z+half.z], [0.0, 0.0, 1.0], [1.0, 1.0]),
-            ([pos.x-half.x, pos.y+half.y, pos.z+half.z], [0.0, 0.0, 1.0], [0.0, 1.0]),
+            (
+                [pos.x - half.x, pos.y - half.y, pos.z + half.z],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y - half.y, pos.z + half.z],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y + half.y, pos.z + half.z],
+                [0.0, 0.0, 1.0],
+                [1.0, 1.0],
+            ),
+            (
+                [pos.x - half.x, pos.y + half.y, pos.z + half.z],
+                [0.0, 0.0, 1.0],
+                [0.0, 1.0],
+            ),
             // Back
-            ([pos.x-half.x, pos.y-half.y, pos.z-half.z], [0.0, 0.0, -1.0], [0.0, 0.0]),
-            ([pos.x+half.x, pos.y-half.y, pos.z-half.z], [0.0, 0.0, -1.0], [1.0, 0.0]),
-            ([pos.x+half.x, pos.y+half.y, pos.z-half.z], [0.0, 0.0, -1.0], [1.0, 1.0]),
-            ([pos.x-half.x, pos.y+half.y, pos.z-half.z], [0.0, 0.0, -1.0], [0.0, 1.0]),
+            (
+                [pos.x - half.x, pos.y - half.y, pos.z - half.z],
+                [0.0, 0.0, -1.0],
+                [0.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y - half.y, pos.z - half.z],
+                [0.0, 0.0, -1.0],
+                [1.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y + half.y, pos.z - half.z],
+                [0.0, 0.0, -1.0],
+                [1.0, 1.0],
+            ),
+            (
+                [pos.x - half.x, pos.y + half.y, pos.z - half.z],
+                [0.0, 0.0, -1.0],
+                [0.0, 1.0],
+            ),
             // Left
-            ([pos.x-half.x, pos.y-half.y, pos.z-half.z], [-1.0, 0.0, 0.0], [0.0, 0.0]),
-            ([pos.x-half.x, pos.y+half.y, pos.z-half.z], [-1.0, 0.0, 0.0], [1.0, 0.0]),
-            ([pos.x-half.x, pos.y+half.y, pos.z+half.z], [-1.0, 0.0, 0.0], [1.0, 1.0]),
-            ([pos.x-half.x, pos.y-half.y, pos.z+half.z], [-1.0, 0.0, 0.0], [0.0, 1.0]),
+            (
+                [pos.x - half.x, pos.y - half.y, pos.z - half.z],
+                [-1.0, 0.0, 0.0],
+                [0.0, 0.0],
+            ),
+            (
+                [pos.x - half.x, pos.y + half.y, pos.z - half.z],
+                [-1.0, 0.0, 0.0],
+                [1.0, 0.0],
+            ),
+            (
+                [pos.x - half.x, pos.y + half.y, pos.z + half.z],
+                [-1.0, 0.0, 0.0],
+                [1.0, 1.0],
+            ),
+            (
+                [pos.x - half.x, pos.y - half.y, pos.z + half.z],
+                [-1.0, 0.0, 0.0],
+                [0.0, 1.0],
+            ),
             // Right
-            ([pos.x+half.x, pos.y-half.y, pos.z-half.z], [1.0, 0.0, 0.0], [0.0, 0.0]),
-            ([pos.x+half.x, pos.y+half.y, pos.z-half.z], [1.0, 0.0, 0.0], [1.0, 0.0]),
-            ([pos.x+half.x, pos.y+half.y, pos.z+half.z], [1.0, 0.0, 0.0], [1.0, 1.0]),
-            ([pos.x+half.x, pos.y-half.y, pos.z+half.z], [1.0, 0.0, 0.0], [0.0, 1.0]),
+            (
+                [pos.x + half.x, pos.y - half.y, pos.z - half.z],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y + half.y, pos.z - half.z],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0],
+            ),
+            (
+                [pos.x + half.x, pos.y + half.y, pos.z + half.z],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0],
+            ),
+            (
+                [pos.x + half.x, pos.y - half.y, pos.z + half.z],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0],
+            ),
         ];
 
         for (p, n, u) in vertices {
@@ -56,7 +152,10 @@ pub(crate) fn create_merged_box_mesh(boxes: &[(Vec3, Vec3)]) -> Mesh {
         }
     }
 
-    let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList, bevy::render::render_asset::RenderAssetUsages::RENDER_WORLD);
+    let mut mesh = Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
+        bevy::render::render_asset::RenderAssetUsages::RENDER_WORLD,
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -123,7 +222,10 @@ pub(crate) fn create_merged_box_mesh_rotated(boxes: &[(Vec3, Quat, Vec3)]) -> Me
         }
     }
 
-    let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList, bevy::render::render_asset::RenderAssetUsages::RENDER_WORLD);
+    let mut mesh = Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
+        bevy::render::render_asset::RenderAssetUsages::RENDER_WORLD,
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);

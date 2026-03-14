@@ -5,58 +5,102 @@ pub use components::*;
 
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
 use std::f32::consts::TAU;
 
-use crate::components::{Spatial4D, Health};
+use crate::components::{Health, Spatial4D};
 use crate::player::Player;
 
 pub struct AiPlugin;
 
-
 impl Plugin for AiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (
-            spawning::spawn_monsters_on_map_load,
-            update_monster_ai,
-            update_monster_overhead_ui,
-            boss_hypercube_dash,
-            update_monster_state_text,
-            move_enemy_projectiles,
-            update_lifetimes,
-            apply_monster_w_velocity,
-            monster_knockback_decay,
-            monster_collision_damage,
-        ).chain());
+        app.add_systems(
+            Update,
+            (
+                spawning::spawn_monsters_on_map_load,
+                update_monster_ai,
+                update_monster_overhead_ui,
+                boss_hypercube_dash,
+                update_monster_state_text,
+                move_enemy_projectiles,
+                update_lifetimes,
+                apply_monster_w_velocity,
+                monster_knockback_decay,
+                monster_collision_damage,
+            )
+                .chain(),
+        );
     }
 }
 
-fn update_monster_ai(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    player_query: Query<(&Transform, &Spatial4D, &Health), (With<Player>, Without<Monster>)>,
-    mut monster_query: Query<(Entity, &mut Monster, &mut Transform, &mut Spatial4D, &mut crate::components::Velocity4D, &mut ExternalForce, &mut Velocity, &Health), (Without<Player>, With<Monster>)>,
-    mut part_query: Query<(&mut Transform, &mut MonsterPart), (Without<Monster>, Without<Player>)>,
-    mut sfx_events: EventWriter<crate::effects::audio::PlaySfxEvent>,
-    rapier_context: Res<RapierContext>,
-) {
-    let dt = time.delta_seconds();
-    let roll_time = time.elapsed_seconds();
+type PlayerAiQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Transform, &'static Spatial4D, &'static Health),
+    (With<Player>, Without<Monster>),
+>;
+
+type MonsterAiQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Monster,
+        &'static mut Transform,
+        &'static mut Spatial4D,
+        &'static mut crate::components::Velocity4D,
+        &'static mut ExternalForce,
+        &'static mut Velocity,
+        &'static Health,
+    ),
+    (Without<Player>, With<Monster>),
+>;
+
+type MonsterPartAiQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Transform, &'static mut MonsterPart),
+    (Without<Monster>, Without<Player>),
+>;
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct MonsterAiParams<'w, 's> {
+    commands: Commands<'w, 's>,
+    time: Res<'w, Time>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    player_query: PlayerAiQuery<'w, 's>,
+    monster_query: MonsterAiQuery<'w, 's>,
+    part_query: MonsterPartAiQuery<'w, 's>,
+    sfx_events: EventWriter<'w, crate::effects::audio::PlaySfxEvent>,
+    rapier_context: Res<'w, RapierContext>,
+}
+
+fn update_monster_ai(mut p: MonsterAiParams) {
+    let dt = p.time.delta_seconds();
+    let roll_time = p.time.elapsed_seconds();
 
     // Animate parts
-    for (mut tf, mut part) in part_query.iter_mut() {
+    for (mut tf, mut part) in p.part_query.iter_mut() {
         let t = (roll_time * part.speed + part.phase).sin() * 0.5 + 0.5;
         let scale = part.min_scale + (part.max_scale - part.min_scale) * t;
         tf.scale = Vec3::splat(scale);
-        
+
         // Find floor via raycast
         let mut floor_y = tf.translation.y - 100.0;
         let ray_origin = tf.translation + Vec3::Y * 0.1;
-        if let Some((_, toi)) = rapier_context.cast_ray(
-            ray_origin, -Vec3::Y, 150.0, true,
-            QueryFilter::default().exclude_sensors().groups(CollisionGroups::new(Group::all(), Group::all().difference(Group::GROUP_32)))
+        if let Some((_, toi)) = p.rapier_context.cast_ray(
+            ray_origin,
+            -Vec3::Y,
+            150.0,
+            true,
+            QueryFilter::default()
+                .exclude_sensors()
+                .groups(CollisionGroups::new(
+                    Group::all(),
+                    Group::all().difference(Group::GROUP_32),
+                )),
         ) {
             floor_y = ray_origin.y - toi;
         }
@@ -68,25 +112,39 @@ fn update_monster_ai(
                 part.base_offset.y = floor_y;
             }
         }
-        
+
         tf.translation = part.base_offset + Vec3::Y * (t * 0.1); // slight breathing on floor
         tf.rotate_local_y(dt * part.speed);
     }
 
-    let Ok((player_tf, player_sp, player_hp)) = player_query.get_single() else { return };
-    if player_hp.current <= 0.0 { return; }
+    let Ok((player_tf, player_sp, player_hp)) = p.player_query.get_single() else {
+        return;
+    };
+    if player_hp.current <= 0.0 {
+        return;
+    }
 
-    for (_ent, mut monster, mut match_tf, mut mob_sp, _mob_vel4d, mut ext_force, _vel, mob_hp) in monster_query.iter_mut() {
+    for (
+        _ent,
+        mut monster,
+        mut match_tf,
+        mut mob_sp,
+        mut _mob_vel4d,
+        mut ext_force,
+        mut _rapier_vel,
+        mob_hp,
+    ) in p.monster_query.iter_mut()
+    {
         let hp_ratio = mob_hp.current / mob_hp.max;
         let to_player = player_tf.translation - match_tf.translation;
         let mut planar = to_player;
         planar.y = 0.0;
         let dist_3d_sq = planar.length_squared();
 
-        let w_scale = 4.0; 
+        let w_scale = 4.0;
         let dw_scaled = (player_sp.w - mob_sp.w) * w_scale;
         let dist_4d_sq = dist_3d_sq + dw_scaled * dw_scaled;
-        
+
         let guard_sq = monster.guard_range * monster.guard_range;
         let hunt_sq = monster.hunt_range * monster.hunt_range;
         let attack_sq = monster.attack_range * monster.attack_range;
@@ -109,32 +167,40 @@ fn update_monster_ai(
         // State Machine
         if !monster.is_docile || monster.awakened {
             let mut rng = thread_rng();
-            
+
             // 1. Teleport Logic (Parity Check)
-            if monster.teleport_enabled && monster.teleport_cooldown <= 0.0 && monster.state != AiState::Wandering {
-                if rng.gen_bool(0.12 * dt as f64) {
-                    let angle = rng.gen_range(0.0..TAU);
-                    let dist = rng.gen_range(2.0..6.5);
-                    let offset = Vec3::new(angle.cos() * dist, 0.0, angle.sin() * dist);
-                    match_tf.translation = player_tf.translation + offset;
-                    monster.teleport_cooldown = rng.gen_range(3.0..7.0);
-                    sfx_events.send(crate::effects::audio::PlaySfxEvent {
-                        kind: crate::effects::audio::SfxKind::WeaponWarp,
-                        volume: 0.8, pitch: 1.0, position: Some(match_tf.translation),
-                    });
-                }
+            if monster.teleport_enabled
+                && monster.teleport_cooldown <= 0.0
+                && monster.state != AiState::Wandering
+                && rng.gen_bool(0.12 * dt as f64)
+            {
+                let angle = rng.gen_range(0.0..TAU);
+                let dist = rng.gen_range(2.0..6.5);
+                let offset = Vec3::new(angle.cos() * dist, 0.0, angle.sin() * dist);
+                match_tf.translation = player_tf.translation + offset;
+                monster.teleport_cooldown = rng.gen_range(3.0..7.0);
+                p.sfx_events.send(crate::effects::audio::PlaySfxEvent {
+                    kind: crate::effects::audio::SfxKind::WeaponWarp,
+                    volume: 0.8,
+                    pitch: 1.0,
+                    position: Some(match_tf.translation),
+                });
             }
 
             // 2. Liminal Folding Logic (W-layer jumping)
-            if monster.liminal_enabled && monster.fold_jump_cooldown <= 0.0 {
-                if dw_scaled.abs() > 2.0 && rng.gen_bool(0.24 * dt as f64) {
-                    mob_sp.target_w = player_sp.w + rng.gen_range(-1.2..1.2);
-                    monster.fold_jump_cooldown = rng.gen_range(1.5..4.0);
-                    sfx_events.send(crate::effects::audio::PlaySfxEvent {
-                        kind: crate::effects::audio::SfxKind::WeaponWarp,
-                        volume: 0.6, pitch: 1.2, position: Some(match_tf.translation),
-                    });
-                }
+            if monster.liminal_enabled
+                && monster.fold_jump_cooldown <= 0.0
+                && dw_scaled.abs() > 2.0
+                && rng.gen_bool(0.24 * dt as f64)
+            {
+                mob_sp.target_w = player_sp.w + rng.gen_range(-1.2..1.2);
+                monster.fold_jump_cooldown = rng.gen_range(1.5..4.0);
+                p.sfx_events.send(crate::effects::audio::PlaySfxEvent {
+                    kind: crate::effects::audio::SfxKind::WeaponWarp,
+                    volume: 0.6,
+                    pitch: 1.2,
+                    position: Some(match_tf.translation),
+                });
             }
 
             if dist_4d_sq > guard_sq {
@@ -146,13 +212,21 @@ fn update_monster_ai(
                     let mut rng = thread_rng();
                     let roll = rng.gen::<f32>();
                     if hp_ratio < 0.24 {
-                        if roll < 0.6 { monster.state = AiState::Wandering; }
-                        else if roll < 0.8 { monster.state = AiState::Guarding; }
-                        else { monster.state = AiState::Running; }
+                        if roll < 0.6 {
+                            monster.state = AiState::Wandering;
+                        } else if roll < 0.8 {
+                            monster.state = AiState::Guarding;
+                        } else {
+                            monster.state = AiState::Running;
+                        }
                     } else {
-                        if roll < 0.6 { monster.state = AiState::Wandering; }
-                        else if roll < 0.85 { monster.state = AiState::Guarding; }
-                        else { monster.state = AiState::Hunting; }
+                        if roll < 0.6 {
+                            monster.state = AiState::Wandering;
+                        } else if roll < 0.85 {
+                            monster.state = AiState::Guarding;
+                        } else {
+                            monster.state = AiState::Hunting;
+                        }
                     }
                     monster.ai_state_timer = rng.gen_range(2.5..6.0);
                 }
@@ -171,51 +245,58 @@ fn update_monster_ai(
             }
 
             // 3. Ranged Attack Logic
-            if monster.ranged_enabled && monster.ranged_cooldown <= 0.0 && matches!(monster.state, AiState::Hunting | AiState::Attacking) {
-                if dist_4d_sq > 4.0 && dist_4d_sq < 400.0 {
-                    // Spawn projectile (Issue 11 parity)
-                    commands.spawn((
-                        PbrBundle {
-                            mesh: meshes.add(Cuboid::new(0.4, 0.4, 0.4)).into(),
-                            material: materials.add(StandardMaterial {
-                                base_color: Color::srgba(1.0, 0.2, 0.2, 0.9),
-                                emissive: LinearRgba::from(Color::srgba(1.0, 0.1, 0.1, 1.0)) * 5.0,
-                                ..default()
-                            }),
-                            transform: Transform::from_translation(match_tf.translation + Vec3::Y * 0.5),
+            if monster.ranged_enabled
+                && monster.ranged_cooldown <= 0.0
+                && matches!(monster.state, AiState::Hunting | AiState::Attacking)
+                && dist_4d_sq > 4.0
+                && dist_4d_sq < 400.0
+            {
+                // Spawn projectile (Issue 11 parity)
+                p.commands.spawn((
+                    PbrBundle {
+                        mesh: p.meshes.add(Cuboid::new(0.4, 0.4, 0.4)),
+                        material: p.materials.add(StandardMaterial {
+                            base_color: Color::srgba(1.0, 0.2, 0.2, 0.9),
+                            emissive: LinearRgba::from(Color::srgba(1.0, 0.1, 0.1, 1.0)) * 5.0,
                             ..default()
-                        },
-                        crate::components::Velocity4D {
-                            lin_v: (player_tf.translation - match_tf.translation).normalize() * 12.0,
-                            w_v: 0.0,
-                        },
-                        crate::components::EnemyProjectile,
-                        crate::components::LifeTime(4.0),
-                        Spatial4D {
-                            w: mob_sp.w,
-                            target_w: mob_sp.w,
-                            layer: mob_sp.layer,
-                            is_folded: false,
-                        },
-                    ));
-                    monster.ranged_cooldown = rng.gen_range(2.0..4.0);
-                    sfx_events.send(crate::effects::audio::PlaySfxEvent {
-                        kind: crate::effects::audio::SfxKind::WeaponSwing,
-                        volume: 0.7, pitch: 0.85, position: Some(match_tf.translation),
-                    });
-                }
+                        }),
+                        transform: Transform::from_translation(
+                            match_tf.translation + Vec3::Y * 0.5,
+                        ),
+                        ..default()
+                    },
+                    crate::components::Velocity4D {
+                        lin_v: (player_tf.translation - match_tf.translation).normalize() * 12.0,
+                        w_v: 0.0,
+                    },
+                    crate::components::EnemyProjectile,
+                    crate::components::LifeTime(4.0),
+                    Spatial4D {
+                        w: mob_sp.w,
+                        target_w: mob_sp.w,
+                        layer: mob_sp.layer,
+                        is_folded: false,
+                    },
+                ));
+                monster.ranged_cooldown = rng.gen_range(2.0..4.0);
+                p.sfx_events.send(crate::effects::audio::PlaySfxEvent {
+                    kind: crate::effects::audio::SfxKind::WeaponSwing,
+                    volume: 0.7,
+                    pitch: 0.85,
+                    position: Some(match_tf.translation),
+                });
             }
         }
 
         // Movement application
         let _max_speed = 8.0 * monster.speed_boost;
         let accel = 15.0;
-        
+
         match monster.state {
             AiState::Wandering => {
                 // Minimal random movement, damp out
                 ext_force.force = Vec3::ZERO;
-            },
+            }
             AiState::Guarding => {
                 // Move slowly towards player if far, back off if close
                 let dir = to_player.normalize_or_zero();
@@ -224,12 +305,12 @@ fn update_monster_ai(
                 } else {
                     ext_force.force = -dir * accel * 0.4;
                 }
-            },
+            }
             AiState::Hunting | AiState::Attacking => {
                 // Move directly towards player
                 let dir = to_player.normalize_or_zero();
                 ext_force.force = dir * accel;
-            },
+            }
             AiState::Running => {
                 // Flee
                 let dir = -to_player.normalize_or_zero();
@@ -245,14 +326,20 @@ fn update_monster_overhead_ui(
     mut hp_fill_query: Query<&mut Sprite, With<crate::components::MonsterHpBarFill>>,
     mut visibility_query: Query<&mut Visibility>,
 ) {
-    let Ok(player_tf) = player_query.get_single() else { return };
+    let Ok(player_tf) = player_query.get_single() else {
+        return;
+    };
     let p_pos = player_tf.translation;
 
     for (m_tf, health, children) in monster_query.iter() {
         let dist = p_pos.distance(m_tf.translation);
-        let visible = if dist > 35.0 { Visibility::Hidden } else { Visibility::Inherited };
+        let visible = if dist > 35.0 {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
         let ratio = (health.current / health.max).clamp(0.0, 1.0);
-        
+
         for &child in children.iter() {
             if let Ok(mut sprite) = hp_fill_query.get_mut(child) {
                 sprite.custom_size = Some(Vec2::new(1.7 * ratio, 0.15));
@@ -266,7 +353,13 @@ fn update_monster_overhead_ui(
 
 fn boss_hypercube_dash(
     time: Res<Time>,
-    mut boss_query: Query<(&mut Boss, &mut Monster, &mut Spatial4D, &mut ExternalForce, &Transform)>,
+    mut boss_query: Query<(
+        &mut Boss,
+        &mut Monster,
+        &mut Spatial4D,
+        &mut ExternalForce,
+        &Transform,
+    )>,
     player_query: Query<&Transform, With<Player>>,
 ) {
     if let Ok(player_tf) = player_query.get_single() {
@@ -279,14 +372,17 @@ fn boss_hypercube_dash(
                     let mut rng = thread_rng();
                     let random_w = rng.gen_range(-15.0..15.0);
                     spatial.target_w = random_w;
-                    info!("Boss initiated Hypercube Dash! Shifting to W: {:.1}", random_w);
+                    info!(
+                        "Boss initiated Hypercube Dash! Shifting to W: {:.1}",
+                        random_w
+                    );
 
                     // 2. Launch massive impulse towards player across 3D space
                     let mut dir = (player_tf.translation - boss_tf.translation).normalize_or_zero();
                     dir.y = 0.0; // Keep horizontal
                     let dash_force = 1200.0 * monster.speed_boost;
                     force.force = dir * dash_force;
-                    
+
                     // Temporarily increase attack range for the dash
                     monster.state = AiState::Attacking;
                 } else {
@@ -300,7 +396,7 @@ fn boss_hypercube_dash(
                 let mut dir = -(player_tf.translation - boss_tf.translation).normalize_or_zero();
                 dir.y = 0.0;
                 force.force = dir * 25.0 * monster.speed_boost;
-                
+
                 // Panic dash
                 if boss.dash_cooldown.just_finished() {
                     spatial.target_w = if spatial.w < 0.0 { 15.0 } else { -15.0 };
@@ -309,9 +405,11 @@ fn boss_hypercube_dash(
             } else {
                 force.force = Vec3::ZERO;
             }
-            
+
             // Fast hypercube lerping
-            spatial.w = spatial.w.lerp(spatial.target_w, 20.0 * time.delta_seconds());
+            spatial.w = spatial
+                .w
+                .lerp(spatial.target_w, 20.0 * time.delta_seconds());
             spatial.layer = (spatial.w / 5.0).round() as i32;
         }
     }
@@ -342,26 +440,32 @@ fn update_monster_state_text(
             }
 
             // Fire floating announcement event if it's a major tactical state (Issue 10)
-            if monster.last_announced_state.is_some() {
-                if matches!(monster.state, AiState::Guarding | AiState::Hunting | AiState::Attacking | AiState::Running) {
-                    fx.send(crate::effects::FloatingTextEvent {
-                        pos: transform.translation + Vec3::new(0.0, 1.3, 0.0),
-                        text: text_str.to_string(),
-                        color,
-                        scale: 0.2, // matching Python scale=0.2
-                        life: 0.8,
-                    });
-                }
+            if monster.last_announced_state.is_some()
+                && matches!(
+                    monster.state,
+                    AiState::Guarding | AiState::Hunting | AiState::Attacking | AiState::Running
+                )
+            {
+                fx.send(crate::effects::FloatingTextEvent {
+                    pos: transform.translation + Vec3::new(0.0, 1.3, 0.0),
+                    text: text_str.to_string(),
+                    color,
+                    scale: 0.2, // matching Python scale=0.2
+                    life: 0.8,
+                });
             }
 
-        monster.last_announced_state = Some(monster.state);
+            monster.last_announced_state = Some(monster.state);
         }
     }
 }
 
 fn move_enemy_projectiles(
     time: Res<Time>,
-    mut query: Query<(&mut Transform, &crate::components::Velocity4D), With<crate::components::EnemyProjectile>>,
+    mut query: Query<
+        (&mut Transform, &crate::components::Velocity4D),
+        With<crate::components::EnemyProjectile>,
+    >,
 ) {
     let dt = time.delta_seconds();
     for (mut tf, vel) in query.iter_mut() {
@@ -407,18 +511,41 @@ fn monster_knockback_decay(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct MonsterCollisionParams<'w, 's> {
+    player_query: Query<
+        'w,
+        's,
+        (
+            &'static Transform,
+            &'static Spatial4D,
+            &'static mut crate::player::PlayerStats,
+        ),
+        With<Player>,
+    >,
+    monster_query: Query<'w, 's, (&'static Transform, &'static Spatial4D, &'static Monster)>,
+    projectile_query: Query<
+        'w,
+        's,
+        (Entity, &'static Transform, &'static Spatial4D),
+        With<crate::components::EnemyProjectile>,
+    >,
+    fx_events: EventWriter<'w, crate::effects::FloatingTextEvent>,
+    sfx_events: EventWriter<'w, crate::effects::audio::PlaySfxEvent>,
+    commands: Commands<'w, 's>,
+}
+
 fn monster_collision_damage(
-    mut player_query: Query<(&Transform, &Spatial4D, &mut crate::player::PlayerStats), With<Player>>,
+    mut params: MonsterCollisionParams,
     mut jump: ResMut<crate::player::JumpState>,
     mut kill_protection: ResMut<crate::systems::progression::KillProtection>,
-    monster_query: Query<(&Transform, &Spatial4D, &Monster)>,
-    projectile_query: Query<(Entity, &Transform, &Spatial4D), With<crate::components::EnemyProjectile>>,
-    mut fx_events: EventWriter<crate::effects::FloatingTextEvent>,
-    mut sfx_events: EventWriter<crate::effects::audio::PlaySfxEvent>,
-    mut commands: Commands,
 ) {
-    let Ok((player_tf, player_sp, mut stats)) = player_query.get_single_mut() else { return };
-    if jump.player_damage_cooldown > 0.0 { return; }
+    let Ok((player_tf, player_sp, mut stats)) = params.player_query.get_single_mut() else {
+        return;
+    };
+    if jump.player_damage_cooldown > 0.0 {
+        return;
+    }
 
     if kill_protection.stacks > 0 {
         kill_protection.stacks -= 1;
@@ -428,54 +555,63 @@ fn monster_collision_damage(
     let p_pos = player_tf.translation;
 
     // 1. Monster Contact Damage
-    for (m_tf, m_sp, monster) in monster_query.iter() {
-        if (m_sp.layer - player_sp.layer).abs() > 0 { continue; }
-        
+    for (m_tf, m_sp, monster) in params.monster_query.iter() {
+        if (m_sp.layer - player_sp.layer).abs() > 0 {
+            continue;
+        }
+
         let dist = p_pos.distance(m_tf.translation);
-        if dist < 1.4 { // ball_radius(0.68) + monster_radius(0.7 approx)
+        if dist < 1.4 {
+            // ball_radius(0.68) + monster_radius(0.7 approx)
             let dmg = 12.0 * monster.attack_mult;
             stats.hp -= dmg;
             jump.player_damage_cooldown = 0.45;
 
-            fx_events.send(crate::effects::FloatingTextEvent {
+            params.fx_events.send(crate::effects::FloatingTextEvent {
                 pos: p_pos + Vec3::Y * 1.5,
                 text: format!("HP -{}", dmg as i32),
                 color: Color::srgba(1.0, 0.2, 0.2, 1.0),
                 scale: 0.3,
                 life: 1.0,
             });
-            
-            sfx_events.send(crate::effects::audio::PlaySfxEvent {
+
+            params.sfx_events.send(crate::effects::audio::PlaySfxEvent {
                 kind: crate::effects::audio::SfxKind::MonsterHit,
-                volume: 1.0, pitch: 0.8, position: Some(p_pos),
+                volume: 1.0,
+                pitch: 0.8,
+                position: Some(p_pos),
             });
             return; // One hit per frame max
         }
     }
 
     // 2. Projectile Damage
-    for (entity, proj_tf, proj_sp) in projectile_query.iter() {
-         if (proj_sp.layer - player_sp.layer).abs() > 0 { continue; }
-         let dist = p_pos.distance(proj_tf.translation);
-         if dist < 1.1 {
+    for (entity, proj_tf, proj_sp) in params.projectile_query.iter() {
+        if (proj_sp.layer - player_sp.layer).abs() > 0 {
+            continue;
+        }
+        let dist = p_pos.distance(proj_tf.translation);
+        if dist < 1.1 {
             stats.hp -= 15.0;
             jump.player_damage_cooldown = 0.45;
 
-            fx_events.send(crate::effects::FloatingTextEvent {
+            params.fx_events.send(crate::effects::FloatingTextEvent {
                 pos: p_pos + Vec3::Y * 1.5,
-                text: format!("HP -15"),
+                text: "HP -15".to_string(),
                 color: Color::srgba(1.0, 0.2, 0.2, 1.0),
                 scale: 0.3,
                 life: 1.0,
             });
-            
-            sfx_events.send(crate::effects::audio::PlaySfxEvent {
+
+            params.sfx_events.send(crate::effects::audio::PlaySfxEvent {
                 kind: crate::effects::audio::SfxKind::MonsterHit,
-                volume: 1.0, pitch: 0.7, position: Some(p_pos),
+                volume: 1.0,
+                pitch: 0.7,
+                position: Some(p_pos),
             });
-            
-            commands.entity(entity).despawn_recursive();
+
+            params.commands.entity(entity).despawn_recursive();
             return;
-         }
+        }
     }
 }

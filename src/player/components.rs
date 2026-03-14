@@ -12,9 +12,6 @@ pub struct InvertedEchoCamera;
 #[derive(Component)]
 pub struct FloatingTextCamera;
 
-#[derive(Component)]
-pub struct ForegroundCamera;
-
 #[derive(Component, Default)]
 pub struct PlayerStats {
     pub hp: f32,
@@ -38,15 +35,16 @@ pub struct LocalPlayerXpBar;
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Resource)]
-#[allow(dead_code)]
 pub struct CameraOrbitState {
     pub smoothed_dir: Vec3,
     pub heading: f32,
-    pub pitch: f32,
     pub heading_input: f32,
     pub pitch_input: f32,
     pub manual_turn_hold: f32,
     pub smoothed_pos: Option<Vec3>,
+    pub follow: f32,
+    pub height: f32,
+    pub fov_deg: f32,
 }
 
 impl Default for CameraOrbitState {
@@ -54,11 +52,13 @@ impl Default for CameraOrbitState {
         Self {
             smoothed_dir: -Vec3::Z,
             heading: 0.0,
-            pitch: 14.0,
             heading_input: 0.0,
             pitch_input: 0.0,
             manual_turn_hold: 0.0,
             smoothed_pos: None,
+            follow: CAMERA_FOLLOW_DISTANCE,
+            height: CAMERA_HEIGHT_OFFSET,
+            fov_deg: CAMERA_FOV_BASE,
         }
     }
 }
@@ -74,27 +74,14 @@ impl Default for GravityDirection {
     }
 }
 
-/// Hyperspace state — tracks the 4D hyperspace dimension shift mode.
-/// Original: hyperspace_threshold = 0.55, hyper_w_limit = 2.25,
-/// hyperspace_bounce_gain = 0.82, etc.
-
-#[allow(dead_code)]
-pub struct PlayerSpawnPoint(pub Vec3);
-
 #[derive(Resource)]
-#[allow(dead_code)]
 pub struct HyperspaceState {
     pub threshold: f32,
     pub w_limit: f32,
-    pub bounce_gain: f32,
     pub force_strength: f32,
     pub force_lift: f32,
-    pub restitution_normal: f32,
-    pub restitution_hyperspace: f32,
     pub gravity_hold: bool,
     pub shift_brake_drag: f32,
-    pub hyper_mouse_w_speed: f32,
-    pub hyper_turn_w_speed: f32,
     pub ball_friction_default: f32,
     pub ball_friction_shift: f32,
 }
@@ -104,15 +91,10 @@ impl Default for HyperspaceState {
         Self {
             threshold: 0.2,
             w_limit: 7.2,
-            bounce_gain: 0.9,
             force_strength: 42.0,
             force_lift: 0.18,
-            restitution_normal: 0.04,
-            restitution_hyperspace: 0.92,
             gravity_hold: false,
             shift_brake_drag: 4.1,
-            hyper_mouse_w_speed: 1.0,
-            hyper_turn_w_speed: 0.65,
             ball_friction_default: 0.02,
             ball_friction_shift: 0.05,
         }
@@ -124,16 +106,8 @@ impl HyperspaceState {
     pub fn is_active(&self, player_w: f32) -> bool {
         player_w.abs() > self.threshold
     }
-
-    /// Normalized hyperspace amount [0..1]
-    pub fn amount(&self, player_w: f32) -> f32 {
-        let raw = (player_w.abs() - self.threshold)
-            / (self.w_limit - self.threshold).max(0.001);
-        raw.clamp(0.0, 1.0)
-    }
 }
 
-/// Multi-jump state
 #[derive(Resource)]
 pub struct JumpState {
     pub grounded: bool,
@@ -171,14 +145,12 @@ impl Default for JumpState {
     }
 }
 
-/// Previous ball state for anti-tunneling and impact detection
 #[derive(Resource, Default)]
 pub struct PrevBallState {
     pub position: Vec3,
     pub velocity: Vec3,
 }
 
-/// Various physics timers from the game loop
 #[derive(Resource)]
 pub struct PhysicsTimers {
     pub roll_time: f32,
@@ -198,10 +170,6 @@ impl Default for PhysicsTimers {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants (from original main.py __init__)
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(crate) const BALL_RADIUS: f32 = 0.68;
 pub(crate) const MAX_BALL_SPEED: f32 = 15.25;
 pub(crate) const LINK_CONTROL_GAIN: f32 = 32.0;
@@ -217,10 +185,7 @@ pub(crate) const CAMERA_FOV_BASE: f32 = 108.0;
 pub(crate) const CAMERA_AUTO_ALIGN_SPEED: f32 = 3.5;
 pub(crate) const CAMERA_AUTO_ALIGN_MIN_SPEED: f32 = 0.08;
 pub(crate) const CAMERA_BALL_CLEARANCE: f32 = 0.16;
-#[allow(dead_code)]
-pub(crate) const CAMERA_ORBIT_SPEED: f32 = 66.0;
-#[allow(dead_code)]
-pub(crate) const CAMERA_PITCH_SPEED: f32 = 66.0;
 pub(crate) const COMPRESSION_SMOOTH_SPEED: f32 = 8.0;
+pub(crate) const SPACE_COMPRESS_3D_STRENGTH: f32 = 0.1;
+pub(crate) const CAMERA_DIMENSION_BLEND_SPEED: f32 = 6.5;
 pub(crate) const TUNNEL_MIN_TRAVEL: f32 = 0.04; // ball_radius * 0.06 ≈ 0.04
-

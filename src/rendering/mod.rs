@@ -1,6 +1,7 @@
 #![allow(dead_code)]
-pub mod thermal;
+// Shader layout structs in this module mirror WGSL uniforms used by the GPU.
 pub mod particles;
+pub mod thermal;
 use bevy::{
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
@@ -24,17 +25,23 @@ impl Plugin for RenderingPlugin {
             MaterialPlugin::<thermal::ThermalMaterial>::default(),
             particles::AtmosphericParticlesPlugin,
         ));
-        app.add_systems(Update, (
-            sync_material_uniforms,
-            update_floor_wetness,
-        ).run_if(in_state(crate::systems::progression::GameState::Playing)));
+        app.init_resource::<FloorRippleState>();
+        app.add_systems(
+            Update,
+            (sync_material_uniforms, update_floor_wetness)
+                .run_if(in_state(crate::systems::progression::GameState::Playing)),
+        );
     }
 }
 
 pub fn update_floor_wetness(
-    player_query: Query<(&Transform, &bevy_rapier3d::prelude::Velocity), With<crate::player::Player>>,
+    player_query: Query<
+        (&Transform, &bevy_rapier3d::prelude::Velocity),
+        With<crate::player::Player>,
+    >,
     monster_query: Query<(&Transform, &bevy_rapier3d::prelude::Velocity), With<crate::ai::Monster>>,
     mut floor_materials: ResMut<Assets<FloorWetMaterial>>,
+    mut ripple_state: ResMut<FloorRippleState>,
     time: Res<Time>,
 ) {
     let dt = time.delta_seconds();
@@ -44,13 +51,22 @@ pub fn update_floor_wetness(
         let pos = player_tf.translation;
         let speed = player_vel.linvel.length();
 
-        let ground_y = crate::player::BALL_RADIUS; 
-        let is_grounded = pos.y < ground_y + 0.15; 
+        let ground_y = crate::player::BALL_RADIUS;
+        let is_grounded = pos.y < ground_y + 0.15;
+
+        let mut emit_player_pulse = false;
+        let player_uv = Vec2::new(pos.x, pos.z);
+        let emit_interval = 1.0_f32 / 14.0_f32;
+        ripple_state.emit_timer += dt;
+        if is_grounded && ripple_state.emit_timer >= emit_interval {
+            ripple_state.emit_timer -= emit_interval;
+            emit_player_pulse = true;
+        }
 
         for (_, material) in floor_materials.iter_mut() {
             let settings = &mut material.extension.settings;
             settings.time = t;
-            
+
             if is_grounded {
                 let target_uv = Vec2::new(pos.x, pos.z);
                 if settings.wake_strength < 0.02 {
@@ -58,7 +74,7 @@ pub fn update_floor_wetness(
                 }
                 let follow = (dt * 18.0).min(1.0);
                 settings.contact_uv += (target_uv - settings.contact_uv) * follow;
-                
+
                 let speed_norm = (speed / 15.25).min(1.0);
                 let strength_inc = (0.22 + speed_norm * 0.78) * dt * 7.0;
                 settings.wake_strength = (settings.wake_strength + strength_inc).min(1.0);
@@ -88,6 +104,20 @@ pub fn update_floor_wetness(
                 }
             }
 
+            if emit_player_pulse {
+                let mut best_idx = 0;
+                let mut min_strength = 1.0_f32;
+                for i in 0..8 {
+                    if settings.pulses[i].w < min_strength {
+                        min_strength = settings.pulses[i].w;
+                        best_idx = i;
+                    }
+                }
+                if min_strength < 0.02_f32 {
+                    settings.pulses[best_idx] = Vec4::new(player_uv.x, player_uv.y, t, 1.0_f32);
+                }
+            }
+
             // Decay extra pulses
             for i in 0..8 {
                 let strength = settings.pulses[i].w;
@@ -99,33 +129,52 @@ pub fn update_floor_wetness(
     }
 }
 
-pub fn sync_material_uniforms(
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct MaterialSyncParams<'w, 's> {
     player_query: Query<
-        (&crate::components::Spatial4D, &crate::components::CompressionState),
+        'w,
+        's,
+        (
+            &'static crate::components::Spatial4D,
+            &'static crate::components::CompressionState,
+        ),
         With<crate::player::Player>,
     >,
-    mut hyper_slice_materials: ResMut<Assets<HyperSliceMaterial>>,
-    mut floor_materials: ResMut<Assets<crate::rendering::thermal::ThermalMaterial>>,
-    mut water_materials: ResMut<Assets<WaterSurfaceMaterial>>,
-    mut ceiling_materials: ResMut<Assets<CeilingMaterial>>,
-    mut ball_materials: ResMut<Assets<BallMaterial>>,
-    mut boss_materials: ResMut<Assets<BossHyperMaterial>>,
-    time: Res<Time>,
-    spatial_query: Query<&crate::components::Spatial4D>,
-    material_query: Query<(Entity, &Handle<HyperSliceMaterial>, Option<&Parent>)>,
-) {
-    if let Ok((player_spatial, comp_state)) = player_query.get_single() {
-        let t = time.elapsed_seconds();
+    hyper_slice_materials: ResMut<'w, Assets<HyperSliceMaterial>>,
+    floor_materials: ResMut<'w, Assets<crate::rendering::thermal::ThermalMaterial>>,
+    water_materials: ResMut<'w, Assets<WaterSurfaceMaterial>>,
+    ceiling_materials: ResMut<'w, Assets<CeilingMaterial>>,
+    ball_materials: ResMut<'w, Assets<BallMaterial>>,
+    boss_materials: ResMut<'w, Assets<BossHyperMaterial>>,
+    time: Res<'w, Time>,
+    spatial_query: Query<'w, 's, &'static crate::components::Spatial4D>,
+    material_query: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Handle<HyperSliceMaterial>,
+            Option<&'static Parent>,
+        ),
+    >,
+}
+
+pub fn sync_material_uniforms(mut params: MaterialSyncParams) {
+    if let Ok((player_spatial, comp_state)) = params.player_query.get_single() {
+        let t = params.time.elapsed_seconds();
         let w = player_spatial.w;
         let compression_factor = comp_state.factor_smoothed;
 
         // 1. Sync per-entity object_w (Monsters, Projectiles, etc.)
-        for (entity, handle, parent) in material_query.iter() {
-            if let Some(mat) = hyper_slice_materials.get_mut(handle) {
+        for (entity, handle, parent) in params.material_query.iter() {
+            if let Some(mat) = params.hyper_slice_materials.get_mut(handle) {
                 // Try to get Spatial4D from the entity itself or its parent
-                let spatial = spatial_query.get(entity).ok()
-                    .or_else(|| parent.and_then(|p| spatial_query.get(p.get()).ok()));
-                
+                let spatial = params
+                    .spatial_query
+                    .get(entity)
+                    .ok()
+                    .or_else(|| parent.and_then(|p| params.spatial_query.get(p.get()).ok()));
+
                 if let Some(s) = spatial {
                     mat.extension.settings.object_w = s.w;
                 }
@@ -133,35 +182,35 @@ pub fn sync_material_uniforms(
         }
 
         // 2. Sync global/batch material uniforms
-        for (_, mat) in hyper_slice_materials.iter_mut() {
+        for (_, mat) in params.hyper_slice_materials.iter_mut() {
             mat.extension.settings.player_w = w;
             mat.extension.settings.time = t;
             mat.extension.settings.hyper_slice = 2.45;
             mat.extension.settings.hyper_falloff = 1.95;
-            // NOTE: thickness is 1.0 by default in the struct, no need to overwrite here 
+            // NOTE: thickness is 1.0 by default in the struct, no need to overwrite here
             // unless we want it dynamic.
         }
-        for (_, mat) in floor_materials.iter_mut() {
+        for (_, mat) in params.floor_materials.iter_mut() {
             mat.extension.settings.time = t;
             mat.extension.settings.compression_factor = compression_factor;
         }
-        for (_, mat) in water_materials.iter_mut() {
+        for (_, mat) in params.water_materials.iter_mut() {
             mat.extension.settings.player_w = w;
             mat.extension.settings.time = t;
             mat.extension.settings.compression_factor = compression_factor;
         }
-        for (_, mat) in ceiling_materials.iter_mut() {
+        for (_, mat) in params.ceiling_materials.iter_mut() {
             mat.extension.settings.player_w = w;
             mat.extension.settings.time = t;
         }
-        for (_, mat) in ball_materials.iter_mut() {
+        for (_, mat) in params.ball_materials.iter_mut() {
             mat.extension.settings.player_w = w;
             mat.extension.settings.hyper_slice = 2.45;
             mat.extension.settings.hyper_falloff = 1.95;
             mat.extension.settings.object_w = w; // Keep player ball visible in its own slice
             mat.extension.settings.time = t;
         }
-        for (_, mat) in boss_materials.iter_mut() {
+        for (_, mat) in params.boss_materials.iter_mut() {
             mat.extension.settings.hyper_w = w;
         }
     }
@@ -178,21 +227,33 @@ pub struct HyperSliceExtension {
     pub base_texture: Option<Handle<Image>>,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, ShaderType, Debug, Reflect)]
+#[allow(dead_code)]
 pub struct HyperSliceSettings {
+    #[allow(dead_code)]
     pub player_w: f32,
+    #[allow(dead_code)]
     pub object_w: f32,
+    #[allow(dead_code)]
     pub thickness: f32,
+    #[allow(dead_code)]
     pub hyper_slice: f32,
+    #[allow(dead_code)]
     pub hyper_falloff: f32,
+    #[allow(dead_code)]
     pub room_uv_scale: f32, // Byte 12
-    pub time: f32,          // Byte 16
-    pub persistence: f32,   // Byte 20
-    pub fog_start: f32,     // Byte 24
-    pub fog_end: f32,       // Byte 28
+    #[allow(dead_code)]
+    pub time: f32, // Byte 16
+    #[allow(dead_code)]
+    pub persistence: f32, // Byte 20
+    #[allow(dead_code)]
+    pub fog_start: f32, // Byte 24
+    #[allow(dead_code)]
+    pub fog_end: f32, // Byte 28
+    #[allow(dead_code)]
     pub edge_color: LinearRgba, // Byte 32 (Offset 32 is aligned to 16)
-    pub fog_color: LinearRgba,  // Byte 48 (Offset 48 is aligned to 16)
+    #[allow(dead_code)]
+    pub fog_color: LinearRgba, // Byte 48 (Offset 48 is aligned to 16)
 }
 
 impl Default for HyperSliceSettings {
@@ -241,21 +302,26 @@ pub struct FloorWetSettings {
     pub room_uv_scale: f32,
     pub wake_strength: f32,
     pub pulse_count: u32,
-    pub player_w: f32,   // Byte 12
-    pub object_w: f32,   // Byte 16
-    pub thickness: f32,  // Byte 20
-    pub time: f32,       // Byte 24
-    pub pad0: f32,       // Byte 28 -> padding for contact_uv
-    pub contact_uv: Vec2, // Byte 32 (Offset 32 is aligned to 8)
-    pub pad1: Vec2,      // Byte 40-47 -> padding for edge_color
+    pub player_w: f32,          // Byte 12
+    pub object_w: f32,          // Byte 16
+    pub thickness: f32,         // Byte 20
+    pub time: f32,              // Byte 24
+    pub pad0: f32,              // Byte 28 -> padding for contact_uv
+    pub contact_uv: Vec2,       // Byte 32 (Offset 32 is aligned to 8)
+    pub pad1: Vec2,             // Byte 40-47 -> padding for edge_color
     pub edge_color: LinearRgba, // Byte 48 (Offset 48 is aligned to 16)
-    pub pulses: [Vec4; 8], // Byte 64 (Offset 64 is aligned to 16)
+    pub pulses: [Vec4; 8],      // Byte 64 (Offset 64 is aligned to 16)
+}
+
+#[derive(Resource, Default)]
+pub struct FloorRippleState {
+    pub emit_timer: f32,
 }
 
 impl Default for FloorWetSettings {
     fn default() -> Self {
         Self {
-            room_uv_scale: 0.32,
+            room_uv_scale: 30.0,
             wake_strength: 0.0,
             pulse_count: 0,
             player_w: 0.0,
@@ -301,22 +367,22 @@ pub struct WaterSurfaceSettings {
     pub alpha: f32,
     pub rainbow_strength: f32,
     pub diffusion_strength: f32,
-    
+
     pub spec_strength: f32,
     pub room_tex_strength: f32,
     pub room_tex_desat: f32,
     pub thermal_mode: f32,
-    
+
     pub thermal_strength: f32,
     pub compression_factor: f32,
     pub compression_thermal_strength: f32,
     pub density_contrast: f32,
-    
+
     pub density_gamma: f32,
     pub player_w: f32,
     pub corridor_w: f32,
     pub level_z_step: f32,
-    
+
     pub static_uv: f32,
     pub fog_start: f32,
     pub fog_end: f32,
@@ -329,20 +395,20 @@ impl Default for WaterSurfaceSettings {
     fn default() -> Self {
         Self {
             uv_scale: 1.0,
-            alpha: 1.0, // Sync opacity with ceiling for matching vibrancy
-            rainbow_strength: 1.0, // water_thermal_cycle_strength
+            alpha: 1.0,               // Sync opacity with ceiling for matching vibrancy
+            rainbow_strength: 1.0,    // water_thermal_cycle_strength
             diffusion_strength: 0.18, // water_thermal_cycle_speed
-            spec_strength: 0.72, // water_specular_strength
-            room_tex_strength: 0.32, // water_room_tex_strength
-            room_tex_desat: 0.85, // water_room_tex_desat
-            thermal_mode: 1.0, // water_density_thermal_mode
-            thermal_strength: 0.92, // water_density_thermal_strength
+            spec_strength: 0.72,      // water_specular_strength
+            room_tex_strength: 0.32,  // water_room_tex_strength
+            room_tex_desat: 0.85,     // water_room_tex_desat
+            thermal_mode: 1.0,
+            thermal_strength: 1.0,
             compression_factor: 1.0,
             compression_thermal_strength: 0.85, // water_compression_thermal_strength
-            density_contrast: 1.35, // water_density_contrast
-            density_gamma: 0.85, // water_density_gamma
+            density_contrast: 1.35,             // water_density_contrast
+            density_gamma: 0.85,                // water_density_gamma
             player_w: 0.0,
-            corridor_w: 2.45,   // Python parity: u_corridor_w
+            corridor_w: 2.45, // Python parity: u_corridor_w
             level_z_step: 6.0,
             static_uv: 1.0, // Python: water_static_uv = True
             // Original parity (main.py camera fog): black fog, range 0..35
@@ -468,10 +534,15 @@ pub struct BossHyperExtension {
 }
 
 #[derive(Clone, Copy, ShaderType, Debug, Reflect)]
+#[allow(dead_code)]
 pub struct BossHyperSettings {
+    #[allow(dead_code)]
     pub intensity: f32,
+    #[allow(dead_code)]
     pub variant: f32,
+    #[allow(dead_code)]
     pub hyper_w: f32,
+    #[allow(dead_code)]
     pub pad: f32,
 }
 

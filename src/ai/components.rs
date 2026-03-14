@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiState {
     Wandering,
@@ -20,39 +19,39 @@ pub enum MonsterVariant {
 }
 
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct Monster {
     pub variant: MonsterVariant,
     pub state: AiState,
-    
+
     // AI Parameters
     pub attack_mult: f32,
     pub defense: f32,
-    pub critical_chance: f32,
-    
+    // Critical chance is currently unused; remove when crit logic is implemented.
+    // Keeping structure minimal avoids dead code.
+
     // Distances
     pub hunt_range: f32,
     pub attack_range: f32,
     pub guard_range: f32,
-    
+
     // Movement
     pub speed_boost: f32,
-    
+
     // Timers
     pub ai_state_timer: f32,
-    pub jump_cooldown: f32,
-    
+    // Jump cooldown is currently unused; remove when jump-attack logic is implemented.
+
     // Original metadata
     pub is_docile: bool,
     pub awakened: bool,
     pub is_boss: bool,
-    
+
     // Teleport & Liminal (New Parity Gaps)
     pub teleport_enabled: bool,
     pub teleport_cooldown: f32,
     pub liminal_enabled: bool,
     pub fold_jump_cooldown: f32,
-    
+
     pub ranged_enabled: bool,
     pub ranged_cooldown: f32,
     pub cosmic_warp_cooldown: f32,
@@ -66,17 +65,10 @@ pub struct KnockbackVel(pub Vec3);
 pub struct Mob;
 
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct Boss {
-    pub state: AiState,
     pub dash_cooldown: Timer,
 }
 
-#[derive(Component)]
-#[allow(dead_code)]
-pub struct StashedDungeon;
-
-// A marker component to ensure we only spawn once per map load
 #[derive(Component)]
 pub struct MapMonstersSpawned;
 

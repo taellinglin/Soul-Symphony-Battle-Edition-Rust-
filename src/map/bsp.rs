@@ -1,8 +1,8 @@
-use rand::{Rng, seq::SliceRandom, thread_rng};
-use std::collections::{HashSet, HashMap};
+use rand::{seq::SliceRandom, thread_rng, Rng};
+use std::collections::{HashMap, HashSet};
 
-use bevy::prelude::Vec2;
 use super::types::*;
+use bevy::prelude::Vec2;
 
 pub(crate) struct BspState {
     pub width: i32,
@@ -10,7 +10,6 @@ pub(crate) struct BspState {
     pub config: GenerationConfig,
 }
 
-#[allow(dead_code)]
 impl BspState {
     fn cube_unit(&self) -> f32 {
         self.config.base_cube_unit.max(0.25)
@@ -31,7 +30,7 @@ impl BspState {
 
         sx = sx.clamp(0.0, (self.width as f32 - sw).max(0.0));
         sy = sy.clamp(0.0, (self.depth as f32 - sh).max(0.0));
-        
+
         let mut pockets = Vec::new();
         let area = sw * sh;
         let pocket_count = (area / 120.0).max(1.0) as i32; // ~1 pocket per 120 units squared
@@ -42,7 +41,7 @@ impl BspState {
                 let px = sx + rng.gen_range(2.0..(sw - 2.0).max(2.1));
                 let py = sy + rng.gen_range(2.0..(sh - 2.0).max(2.1));
                 let radius = rng.gen_range(4.0..12.0);
-                
+
                 // Usually compress (< 1.0), sometimes dilate (> 1.0)
                 let factor = if rng.gen_bool(0.8) {
                     rng.gen_range(0.45..0.9)
@@ -58,15 +57,28 @@ impl BspState {
             }
         }
 
-        Room { 
-            x: sx, y: sy, w: sw, h: sh, w_layer: 0, _id: 0, 
-            dimension_field: DimensionField::default(), 
+        Room {
+            x: sx,
+            y: sy,
+            w: sw,
+            h: sh,
+            w_layer: 0,
+            _id: 0,
+            dimension_field: DimensionField::default(),
             pockets,
-            doors: RoomDoors::default() 
+            doors: RoomDoors::default(),
         }
     }
 
-    pub fn fit_room_to_cell(&self, gx: i32, gy: i32, size: f32, room_w: f32, room_h: f32, pad: f32) -> Room {
+    pub fn fit_room_to_cell(
+        &self,
+        gx: i32,
+        gy: i32,
+        size: f32,
+        room_w: f32,
+        room_h: f32,
+        pad: f32,
+    ) -> Room {
         let mut rng = thread_rng();
         let corridor_pad = 0.5f32.max((size * 0.22).min(self.config.corridor_width * 0.18));
         let edge_pad = pad.max(corridor_pad);
@@ -76,7 +88,7 @@ impl BspState {
 
         let rx = gx as f32 * size + (size - rw) * 0.5;
         let ry = gy as f32 * size + (size - rh) * 0.5;
-        
+
         let mut room = self.snap_room(rx, ry, rw, rh);
         room.dimension_field = DimensionField {
             base: rng.gen_range(0.85..1.15),
@@ -107,7 +119,11 @@ impl BspState {
             for c in 0..cols {
                 let cx = margin + (c as f32) * step_x + x_offset;
                 let cy = margin + (r as f32) * step_y;
-                if cx < margin || cy < margin || cx > (self.width as f32 - margin) || cy > (self.depth as f32 - margin) {
+                if cx < margin
+                    || cy < margin
+                    || cx > (self.width as f32 - margin)
+                    || cy > (self.depth as f32 - margin)
+                {
                     continue;
                 }
                 cells.push((c, r, cx, cy));
@@ -125,18 +141,25 @@ impl BspState {
 
         for (c, r, cx, cy) in cells.into_iter() {
             let shape_roll: f32 = rng.gen();
-            let rw; let rh;
-            
+            let rw;
+            let rh;
+
             if shape_roll < 0.54 {
-                rw = size * rng.gen_range(0.72..0.96); rh = size * rng.gen_range(0.66..0.9);
+                rw = size * rng.gen_range(0.72..0.96);
+                rh = size * rng.gen_range(0.66..0.9);
             } else if shape_roll < 0.68 {
-                let base = size * rng.gen_range(0.58..0.82); rw = base; rh = base;
+                let base = size * rng.gen_range(0.58..0.82);
+                rw = base;
+                rh = base;
             } else if shape_roll < 0.8 {
-                rw = size * rng.gen_range(1.0..1.38); rh = size * rng.gen_range(0.45..0.7);
+                rw = size * rng.gen_range(1.0..1.38);
+                rh = size * rng.gen_range(0.45..0.7);
             } else if shape_roll < 0.92 {
-                rw = size * rng.gen_range(0.45..0.7); rh = size * rng.gen_range(1.0..1.38);
+                rw = size * rng.gen_range(0.45..0.7);
+                rh = size * rng.gen_range(1.0..1.38);
             } else {
-                rw = size * rng.gen_range(0.6..0.95); rh = size * rng.gen_range(0.6..0.95);
+                rw = size * rng.gen_range(0.6..0.95);
+                rh = size * rng.gen_range(0.6..0.95);
             }
 
             let rw_jittered = rw * rng.gen_range((1.0 - jitter * 0.45)..(1.0 + jitter * 0.4));
@@ -150,7 +173,7 @@ impl BspState {
             let ry = cy - rh * 0.5;
             let mut room = self.snap_room(rx, ry, rw, rh);
             room.w_layer = 0;
-            
+
             let idx = rooms.len();
             rooms.push(room);
             index_map.insert((c, r), idx);
@@ -161,43 +184,71 @@ impl BspState {
             let a = index_map[&(c, r)];
             let mut neighbors = Vec::new();
             if r % 2 == 0 {
-                neighbors.extend_from_slice(&[(c - 1, r), (c + 1, r), (c, r - 1), (c - 1, r - 1), (c, r + 1), (c - 1, r + 1)]);
+                neighbors.extend_from_slice(&[
+                    (c - 1, r),
+                    (c + 1, r),
+                    (c, r - 1),
+                    (c - 1, r - 1),
+                    (c, r + 1),
+                    (c - 1, r + 1),
+                ]);
             } else {
-                neighbors.extend_from_slice(&[(c - 1, r), (c + 1, r), (c, r - 1), (c + 1, r - 1), (c, r + 1), (c + 1, r + 1)]);
+                neighbors.extend_from_slice(&[
+                    (c - 1, r),
+                    (c + 1, r),
+                    (c, r - 1),
+                    (c + 1, r - 1),
+                    (c, r + 1),
+                    (c + 1, r + 1),
+                ]);
             }
 
             for (nc, nr) in neighbors {
                 if let Some(&b) = index_map.get(&(nc, nr)) {
-                    if a != b { let mut k = [a, b]; k.sort(); edges_set.insert((k[0], k[1])); }
+                    if a != b {
+                        let mut k = [a, b];
+                        k.sort();
+                        edges_set.insert((k[0], k[1]));
+                    }
                 }
             }
 
             if rng.gen_bool(0.32) {
                 for (nc, nr) in [(c + 2, r), (c - 2, r), (c, r + 2), (c, r - 2)] {
                     if let Some(&b) = index_map.get(&(nc, nr)) {
-                        if a != b { let mut k = [a, b]; k.sort(); edges_set.insert((k[0], k[1])); }
+                        if a != b {
+                            let mut k = [a, b];
+                            k.sort();
+                            edges_set.insert((k[0], k[1]));
+                        }
                     }
                 }
             }
         }
 
         if edges_set.is_empty() && rooms.len() > 1 {
-            for i in 0..(rooms.len() - 1) { edges_set.insert((i, i + 1)); }
+            for i in 0..(rooms.len() - 1) {
+                edges_set.insert((i, i + 1));
+            }
         }
 
         (rooms, edges_set.into_iter().collect())
     }
 
-    pub fn generate_snake3d(&self, cell_size: i32, layers: i32) -> (Vec<Room>, Vec<(usize, usize)>) {
+    pub fn generate_snake3d(
+        &self,
+        cell_size: i32,
+        layers: i32,
+    ) -> (Vec<Room>, Vec<(usize, usize)>) {
         let mut rng = thread_rng();
         let size = cell_size.max(10) as f32;
         let cols = 3.max((self.width as f32 / size) as i32);
         let rows = 3.max((self.depth as f32 / size) as i32);
         let layer_count = layers.max(2);
-        
+
         let room_budget = self.config.max_rooms.max(8);
         let jitter = self.config.room_size_jitter.clamp(0.0, 0.7);
-        
+
         let pad = 0.45f32.max((size * 0.14).min(2.4));
         let base_room_w = 3.0f32.max(size - pad * 2.0);
         let base_room_h = 3.0f32.max(size - pad * 2.0);
@@ -205,9 +256,13 @@ impl BspState {
         let mut cells_2d = Vec::new();
         for gy in 0..rows {
             if gy % 2 == 0 {
-                for gx in 0..cols { cells_2d.push((gx, gy)); }
+                for gx in 0..cols {
+                    cells_2d.push((gx, gy));
+                }
             } else {
-                for gx in (0..cols).rev() { cells_2d.push((gx, gy)); }
+                for gx in (0..cols).rev() {
+                    cells_2d.push((gx, gy));
+                }
             }
         }
 
@@ -216,12 +271,20 @@ impl BspState {
         let mut previous_idx: Option<usize> = None;
 
         for gz in 0..layer_count {
-            let layer_cells = if gz % 2 == 0 { cells_2d.clone() } else { cells_2d.iter().copied().rev().collect() };
+            let layer_cells = if gz % 2 == 0 {
+                cells_2d.clone()
+            } else {
+                cells_2d.iter().copied().rev().collect()
+            };
             for (gx, gy) in layer_cells {
-                if rooms.len() >= room_budget as usize { break; }
-                
-                let mut rw = base_room_w * rng.gen_range((1.0 - jitter * 0.35)..(1.0 + jitter * 0.2));
-                let mut rh = base_room_h * rng.gen_range((1.0 - jitter * 0.35)..(1.0 + jitter * 0.2));
+                if rooms.len() >= room_budget as usize {
+                    break;
+                }
+
+                let mut rw =
+                    base_room_w * rng.gen_range((1.0 - jitter * 0.35)..(1.0 + jitter * 0.2));
+                let mut rh =
+                    base_room_h * rng.gen_range((1.0 - jitter * 0.35)..(1.0 + jitter * 0.2));
                 rw = 2.8f32.max(rw).min(size - 0.35);
                 rh = 2.8f32.max(rh).min(size - 0.35);
 
@@ -231,24 +294,33 @@ impl BspState {
                 rooms.push(room);
 
                 if let Some(prev) = previous_idx {
-                    let mut k = [prev, idx]; k.sort();
+                    let mut k = [prev, idx];
+                    k.sort();
                     edge_set.insert((k[0], k[1]));
                 }
                 previous_idx = Some(idx);
             }
-            if rooms.len() >= room_budget as usize { break; }
+            if rooms.len() >= room_budget as usize {
+                break;
+            }
         }
 
         (rooms, edge_set.into_iter().collect())
     }
 
-    pub fn generate_maze3d(&self, cell_size: i32, layers: i32, _loop_chance: f32, v_link_chance: f32) -> (Vec<Room>, Vec<(usize, usize)>) {
+    pub fn generate_maze3d(
+        &self,
+        cell_size: i32,
+        layers: i32,
+        _loop_chance: f32,
+        v_link_chance: f32,
+    ) -> (Vec<Room>, Vec<(usize, usize)>) {
         let mut rng = thread_rng();
         let size = cell_size.max(16) as f32;
         let cols = 3.max((self.width as f32 / size) as i32);
         let rows = 3.max((self.depth as f32 / size) as i32);
         let layer_count = layers.max(2);
-        
+
         let _room_budget = self.config.max_rooms.max(8);
 
         let pad = 0.5f32.max((size * 0.16).min(3.0));
@@ -285,19 +357,39 @@ impl BspState {
             let mut lateral = Vec::new();
             let mut vertical = Vec::new();
 
-            if cx + 1 < cols { lateral.push((cx + 1, cy, cz)); }
-            if cx > 0 { lateral.push((cx - 1, cy, cz)); }
-            if cy + 1 < rows { lateral.push((cx, cy + 1, cz)); }
-            if cy > 0 { lateral.push((cx, cy - 1, cz)); }
-            if cz + 1 < layer_count { vertical.push((cx, cy, cz + 1)); }
-            if cz > 0 { vertical.push((cx, cy, cz - 1)); }
+            if cx + 1 < cols {
+                lateral.push((cx + 1, cy, cz));
+            }
+            if cx > 0 {
+                lateral.push((cx - 1, cy, cz));
+            }
+            if cy + 1 < rows {
+                lateral.push((cx, cy + 1, cz));
+            }
+            if cy > 0 {
+                lateral.push((cx, cy - 1, cz));
+            }
+            if cz + 1 < layer_count {
+                vertical.push((cx, cy, cz + 1));
+            }
+            if cz > 0 {
+                vertical.push((cx, cy, cz - 1));
+            }
 
             lateral.shuffle(&mut rng);
             vertical.shuffle(&mut rng);
-            let mut unvisited_lat: Vec<_> = lateral.into_iter().filter(|n| !visited.contains(n)).collect();
-            let mut unvisited_vert: Vec<_> = vertical.into_iter().filter(|n| !visited.contains(n)).collect();
+            let mut unvisited_lat: Vec<_> = lateral
+                .into_iter()
+                .filter(|n| !visited.contains(n))
+                .collect();
+            let mut unvisited_vert: Vec<_> = vertical
+                .into_iter()
+                .filter(|n| !visited.contains(n))
+                .collect();
 
-            let nxt = if !unvisited_lat.is_empty() && (unvisited_vert.is_empty() || rng.gen::<f32>() > v_link_chance) {
+            let nxt = if !unvisited_lat.is_empty()
+                && (unvisited_vert.is_empty() || rng.gen::<f32>() > v_link_chance)
+            {
                 unvisited_lat.pop().unwrap()
             } else if !unvisited_vert.is_empty() {
                 unvisited_vert.pop().unwrap()
@@ -310,7 +402,8 @@ impl BspState {
 
             let a = index_map[&current];
             let b = index_map[&nxt];
-            let mut k = [a, b]; k.sort();
+            let mut k = [a, b];
+            k.sort();
             edge_set.insert((k[0], k[1]));
             visited.insert(nxt);
             stack.push(nxt);
@@ -324,8 +417,8 @@ impl BspState {
         let size = cell_size.max(8) as f32;
         let mut cols = 4.max((self.width as f32 / size) as i32);
         let mut rows = 4.max((self.depth as f32 / size) as i32);
-        
-        let room_budget = self.config.max_rooms.max(8).min(256) as i32;
+
+        let room_budget = self.config.max_rooms.clamp(8, 256);
         while cols * rows > room_budget && (cols > 4 || rows > 4) {
             if cols >= rows && cols > 4 {
                 cols -= 1;
@@ -354,7 +447,7 @@ impl BspState {
 
                 let room_w = 2.8_f32.max(base_room_w * size_scale * (1.0 + aspect_skew));
                 let room_h = 2.8_f32.max(base_room_h * size_scale * (1.0 - aspect_skew));
-                
+
                 let idx = rooms.len();
                 rooms.push(self.fit_room_to_cell(gx, gy, size, room_w, room_h, pad));
                 index_map.insert((gx, gy), idx);
@@ -376,7 +469,7 @@ impl BspState {
                 }
             }
             neighbors.shuffle(&mut rng);
-            
+
             let mut nxt_opt = None;
             for n in neighbors {
                 if !visited.contains(&n) {
@@ -420,7 +513,7 @@ impl BspState {
         let loop_factor = 0.01_f32.max((self.config.corridor_density * 0.14).min(0.2));
         let mut extras = 1.max((edges.len() as f32 * loop_factor) as usize);
         all_neighbor_pairs.shuffle(&mut rng);
-        
+
         for (a, b) in all_neighbor_pairs {
             let mut k = [a, b];
             k.sort();

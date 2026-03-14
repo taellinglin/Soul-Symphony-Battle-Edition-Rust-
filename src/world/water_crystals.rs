@@ -39,9 +39,11 @@ pub struct WaterCrystalPlugin;
 
 impl Plugin for WaterCrystalPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WaterCrystalTimer>()
-            .add_systems(Update, (spawn_water_crystals, update_water_crystals)
-                .run_if(in_state(crate::systems::progression::GameState::Playing)));
+        app.init_resource::<WaterCrystalTimer>().add_systems(
+            Update,
+            (spawn_water_crystals, update_water_crystals)
+                .run_if(in_state(crate::systems::progression::GameState::Playing)),
+        );
     }
 }
 
@@ -57,39 +59,53 @@ const STUCK_DURATION: f32 = 0.9;
 const FLOAT_DURATION: f32 = 10.0;
 const FADE_DURATION: f32 = 1.5;
 
-fn spawn_water_crystals(
-    time: Res<Time>,
-    mut timer: ResMut<WaterCrystalTimer>,
-    config: Res<crate::map::GenerationConfig>,
-    existing: Query<(), With<WaterCrystal>>,
-    player_q: Query<&Transform, With<crate::player::Player>>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+#[derive(bevy::ecs::system::SystemParam)]
+struct CrystalSpawnParams<'w, 's> {
+    time: Res<'w, Time>,
+    timer: ResMut<'w, WaterCrystalTimer>,
+    config: Res<'w, crate::map::GenerationConfig>,
+    existing: Query<'w, 's, (), With<WaterCrystal>>,
+    player_q: Query<'w, 's, &'static Transform, With<crate::player::Player>>,
+    commands: Commands<'w, 's>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+}
+
+fn spawn_water_crystals(mut params: CrystalSpawnParams) {
     if !SPAWN_ENABLED {
         return;
     }
 
-    let existing_count = existing.iter().count();
+    let existing_count = params.existing.iter().count();
     if existing_count >= MAX_COUNT {
         return;
     }
 
-    timer.timer -= time.delta_seconds();
-    if existing_count == 0 && timer.timer <= 0.0 {
-        // Original: when none exist, spawn ~10 immediately
-        timer.timer = SPAWN_INTERVAL;
+    params.timer.timer -= params.time.delta_seconds();
+    if existing_count == 0 && params.timer.timer <= 0.0 {
+        params.timer.timer = SPAWN_INTERVAL;
         for _ in 0..10 {
-            spawn_one_crystal(&config, player_q.get_single().ok(), &mut commands, &mut meshes, &mut materials);
+            spawn_one_crystal(
+                &params.config,
+                params.player_q.get_single().ok(),
+                &mut params.commands,
+                &mut params.meshes,
+                &mut params.materials,
+            );
         }
         return;
     }
 
-    while timer.timer <= 0.0 {
-        spawn_one_crystal(&config, player_q.get_single().ok(), &mut commands, &mut meshes, &mut materials);
-        timer.timer += SPAWN_INTERVAL.max(0.05);
-        if existing.iter().count() >= MAX_COUNT {
+    while params.timer.timer <= 0.0 {
+        spawn_one_crystal(
+            &params.config,
+            params.player_q.get_single().ok(),
+            &mut params.commands,
+            &mut params.meshes,
+            &mut params.materials,
+        );
+        params.timer.timer += SPAWN_INTERVAL.max(0.05);
+        if params.existing.iter().count() >= MAX_COUNT {
             break;
         }
     }
@@ -118,14 +134,19 @@ fn spawn_one_crystal(
     let t = 0.0_f32; // will be sampled in update immediately
     let water_h = crate::player::sample_water_height(x, z, t);
     let float_offset = rng.gen_range(0.02..0.16);
-    let start_h = water_h + rng.gen_range(SPAWN_HEIGHT_MIN..SPAWN_HEIGHT_MAX.max(SPAWN_HEIGHT_MIN + 0.1));
+    let start_h =
+        water_h + rng.gen_range(SPAWN_HEIGHT_MIN..SPAWN_HEIGHT_MAX.max(SPAWN_HEIGHT_MIN + 0.1));
 
     let sx = rng.gen_range(0.26..0.56);
     let sy = rng.gen_range(0.26..0.56);
     let sz = rng.gen_range(0.72..1.45);
 
     let transparent = rng.gen::<f32>() < 0.52;
-    let alpha_base = if transparent { rng.gen_range(0.65..0.9) } else { 1.0 };
+    let alpha_base = if transparent {
+        rng.gen_range(0.65..0.9)
+    } else {
+        1.0
+    };
 
     let hue = rng.gen::<f32>();
     let sat = rng.gen_range(0.75..1.0);
@@ -134,10 +155,19 @@ fn spawn_one_crystal(
     let (r, g, b) = hsv_to_rgb(hue, sat, val);
     let base_color = Color::srgba(r, g, b, alpha_base);
 
-    let alpha_mode = if transparent { AlphaMode::Add } else { AlphaMode::Blend };
+    let alpha_mode = if transparent {
+        AlphaMode::Add
+    } else {
+        AlphaMode::Blend
+    };
     let material = materials.add(StandardMaterial {
         base_color,
-        emissive: LinearRgba::new((r * 1.55).min(2.0), (g * 1.55).min(2.0), (b * 1.55).min(2.0), 1.0),
+        emissive: LinearRgba::new(
+            (r * 1.55).min(2.0),
+            (g * 1.55).min(2.0),
+            (b * 1.55).min(2.0),
+            1.0,
+        ),
         unlit: true,
         alpha_mode,
         ..default()
@@ -175,7 +205,12 @@ fn spawn_one_crystal(
 
 fn update_water_crystals(
     time: Res<Time>,
-    mut q: Query<(Entity, &mut Transform, &mut WaterCrystal, &Handle<StandardMaterial>)>,
+    mut q: Query<(
+        Entity,
+        &mut Transform,
+        &mut WaterCrystal,
+        &Handle<StandardMaterial>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
 ) {
@@ -224,7 +259,11 @@ fn update_water_crystals(
         }
 
         let hue = (crystal.hue + t * crystal.hue_speed) % 1.0;
-        let (r, g, b) = hsv_to_rgb(hue, crystal.sat.clamp(0.0, 1.0), crystal.val.clamp(0.0, 1.0));
+        let (r, g, b) = hsv_to_rgb(
+            hue,
+            crystal.sat.clamp(0.0, 1.0),
+            crystal.val.clamp(0.0, 1.0),
+        );
 
         let mut alpha = crystal.alpha_base;
         if crystal.state == WaterCrystalState::Fading {
@@ -237,7 +276,12 @@ fn update_water_crystals(
 
         if let Some(mat) = materials.get_mut(mat_h) {
             mat.base_color = Color::srgba(r, g, b, alpha.clamp(0.0, 1.0));
-            mat.emissive = LinearRgba::new((r * 1.55).min(2.0), (g * 1.55).min(2.0), (b * 1.55).min(2.0), 1.0);
+            mat.emissive = LinearRgba::new(
+                (r * 1.55).min(2.0),
+                (g * 1.55).min(2.0),
+                (b * 1.55).min(2.0),
+                1.0,
+            );
         }
     }
 }
@@ -260,4 +304,3 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
         _ => (v, p, q),
     }
 }
-

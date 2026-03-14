@@ -1,5 +1,6 @@
-use bevy::prelude::*;
+#![allow(dead_code)]
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderRef, ShaderType};
 
 pub type ThermalMaterial = ExtendedMaterial<StandardMaterial, ThermalExtension>;
@@ -11,15 +12,25 @@ pub struct ThermalExtension {
 }
 
 #[derive(Clone, ShaderType, Debug)]
+#[allow(dead_code)]
 pub struct ThermalSettings {
+    #[allow(dead_code)]
     pub time: f32,
+    #[allow(dead_code)]
     pub uv_scale: f32,
+    #[allow(dead_code)]
     pub density_contrast: f32,
+    #[allow(dead_code)]
     pub density_gamma: f32,
+    #[allow(dead_code)]
     pub thermal_strength: f32,
+    #[allow(dead_code)]
     pub compression_factor: f32,
+    #[allow(dead_code)]
     pub fog_start: f32,
+    #[allow(dead_code)]
     pub fog_end: f32,
+    #[allow(dead_code)]
     pub fog_color: LinearRgba,
 }
 
